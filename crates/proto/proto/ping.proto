@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package ping;
+
+// Service for ping/pong communication
+service PingService {
+  // Unary RPC method for pinging the server
+  rpc Ping (PingRequest) returns (PongResponse);
+}
+
+message PingRequest {
+  string message = 1;
+}
+
+message PongResponse {
+  string message = 1;
+}

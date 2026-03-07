@@ -1,0 +1,16 @@
+[package]
+name = "proto"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "proto"
+path = "src/lib.rs"
+
+[dependencies]
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+prost = { workspace = true }
+
+[build-dependencies]
+tonic-prost-build = "0.14"

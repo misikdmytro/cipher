@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/api",
+    "crates/interfaces",
+    "crates/notificator",
+    "crates/proto",
+    "crates/rotator",
+    "crates/scheduler",
+]
+resolver = "3"
+
+[workspace.dependencies]
+"anyhow" = "1"
+"axum" = { version = "0.8" }
+"thiserror" = "2"
+"tokio" = { version = "1", features = ["full"] }
+"tonic" = { version = "0.14" }
+"tonic-prost" = { version = "0.14" }
+"prost" = { version = "0.14" }

@@ -1,0 +1,13 @@
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+"anyhow" = { workspace = true }
+"axum" = { workspace = true }
+"proto" = { path = "../proto" }
+"thiserror" = { workspace = true }
+"tonic" = { workspace = true }
+"tokio" = { workspace = true }
+

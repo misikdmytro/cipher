@@ -1,0 +1,11 @@
+[package]
+name = "rotator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+"anyhow" = { workspace = true }
+"proto" = { path = "../proto" }
+"thiserror" = { workspace = true }
+"tonic" = { workspace = true }
+"tokio" = { workspace = true }

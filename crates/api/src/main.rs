@@ -1,5 +1,9 @@
 mod api;
+mod config;
 mod grpc;
+mod handlers;
+mod repositories;
+mod services;
 
 use anyhow::Result;
 

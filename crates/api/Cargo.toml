@@ -6,8 +6,13 @@ edition = "2024"
 [dependencies]
 "anyhow" = { workspace = true }
 "axum" = { workspace = true }
+"chrono" = { workspace = true }
+"config" = { workspace = true }
+"diesel" = { workspace = true }
+"interfaces" = { path = "../interfaces" }
 "proto" = { path = "../proto" }
 "thiserror" = { workspace = true }
 "tonic" = { workspace = true }
 "tokio" = { workspace = true }
-
+"serde" = { workspace = true }
+"uuid" = { workspace = true }

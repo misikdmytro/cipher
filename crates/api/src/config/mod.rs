@@ -1,5 +1,3 @@
-use std::fmt::{Display, Formatter};
-
 use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -7,6 +5,7 @@ use thiserror::Error;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     pub database: DatabaseConfig,
+    pub scheduler: GrpcClientConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19,14 +18,25 @@ pub struct DatabaseConfig {
     pub use_ssl: bool,
 }
 
-impl Display for DatabaseConfig {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl DatabaseConfig {
+    pub fn connection_string(&self) -> String {
         let ssl_mode = if self.use_ssl { "require" } else { "disable" };
-        write!(
-            f,
+        format!(
             "postgres://{}:{}@{}:{}/{}?sslmode={}",
             self.username, self.password, self.host, self.port, self.database, ssl_mode
         )
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GrpcClientConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+impl GrpcClientConfig {
+    pub fn address(&self) -> String {
+        format!("{}:{}", self.host, self.port)
     }
 }
 

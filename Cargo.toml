@@ -20,10 +20,11 @@ config = { version = "0.15", features = ["toml"] }
 diesel = { version = "2", features = ["chrono", "postgres", "r2d2", "uuid"] }
 thiserror = "2"
 tracing = "0.1"
+tracing-subscriber = "0.3"
 tokio = { version = "1", features = ["full"] }
 tonic = { version = "0.14" }
 tonic-prost = { version = "0.14" }
 serde = { version = "1", features = ["derive"] }
 parking_lot = "0.12"
 prost = { version = "0.14" }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }

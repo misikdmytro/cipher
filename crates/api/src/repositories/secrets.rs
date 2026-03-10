@@ -47,13 +47,13 @@ struct SecretsRepositoryImpl {
 
 pub fn new_secrets_repository(
     config: &AppConfig,
-) -> Result<impl SecretsRepository, DbConnectionError> {
+) -> Result<impl SecretsRepository + 'static, DbConnectionError> {
     SecretsRepositoryImpl::new(config)
 }
 
 impl SecretsRepositoryImpl {
     pub fn new(config: &AppConfig) -> Result<Self, DbConnectionError> {
-        let manager = ConnectionManager::<PgConnection>::new(config.database.to_string());
+        let manager = ConnectionManager::<PgConnection>::new(config.database.connection_string());
         Pool::builder()
             .build(manager)
             .map_err(|e| DbConnectionError(e.into()))

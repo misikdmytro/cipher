@@ -3,7 +3,7 @@ use tonic::{Request, Response, Status};
 
 struct SchedulerServer;
 
-pub fn new_scheduler_service() -> SchedulerServer {
+pub fn new_scheduler_service() -> impl SchedulerService + 'static {
     SchedulerServer
 }
 

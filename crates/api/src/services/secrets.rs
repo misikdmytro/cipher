@@ -4,7 +4,7 @@ use proto::scheduler::{
     ScheduleSecretRotationRequest, scheduler_service_client::SchedulerServiceClient,
 };
 use tokio::sync::Mutex;
-use tonic::{body::Body, client::GrpcService, transport::Channel};
+use tonic::transport::Channel;
 use tracing::error;
 use uuid::Uuid;
 
@@ -23,10 +23,10 @@ struct SecretsServiceImpl {
     scheduler: Arc<Mutex<SchedulerServiceClient<Channel>>>,
 }
 
-pub fn new_secrets_service<G: GrpcService<Body> + Send + Sync + 'static>(
+pub fn new_secrets_service(
     repository: Box<dyn SecretsRepository>,
     scheduler: Arc<Mutex<SchedulerServiceClient<Channel>>>,
-) -> impl SecretsService {
+) -> impl SecretsService + Send + Sync + 'static {
     SecretsServiceImpl {
         repository,
         scheduler,
@@ -43,7 +43,6 @@ impl SecretsService for SecretsServiceImpl {
         })?;
 
         let mut scheduler = self.scheduler.lock().await;
-
         scheduler
             .schedule_secret_rotation(ScheduleSecretRotationRequest {
                 secret_id: secret.id.to_string(),

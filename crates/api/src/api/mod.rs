@@ -1,12 +1,15 @@
+use std::sync::Arc;
+
 use anyhow::Result;
-use axum::{Router, routing::get};
+use tokio::net::TcpListener;
 
-pub async fn serve() -> Result<()> {
-    // build our application with a single route
-    let app = Router::new().route("/", get(|| async { "Hello, World!" }));
+use crate::{handlers, state::AppState};
 
-    // run our app with hyper, listening globally on port 3000
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+pub async fn serve(state: Arc<AppState>) -> Result<()> {
+    let app = handlers::router(state);
+
+    // TODO: configure it
+    let listener = TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
 
     Ok(())

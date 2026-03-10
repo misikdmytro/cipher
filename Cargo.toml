@@ -10,15 +10,20 @@ members = [
 resolver = "3"
 
 [workspace.dependencies]
-"anyhow" = "1"
-"axum" = { version = "0.8" }
-"chrono" = "0.4"
+anyhow = "1"
+apalis = { version = "0.7" }
+apalis-postgres = { version = "1.0.0-rc.4" }
+async-trait = "0.1"
+axum = { version = "0.8" }
+chrono = "0.4"
 config = { version = "0.15", features = ["toml"] }
 diesel = { version = "2", features = ["chrono", "postgres", "r2d2", "uuid"] }
-"thiserror" = "2"
-"tokio" = { version = "1", features = ["full"] }
-"tonic" = { version = "0.14" }
-"tonic-prost" = { version = "0.14" }
-"serde" = { version = "1", features = ["derive"] }
-"prost" = { version = "0.14" }
-"uuid" = { version = "1", features = ["v4"] }
+thiserror = "2"
+tracing = "0.1"
+tokio = { version = "1", features = ["full"] }
+tonic = { version = "0.14" }
+tonic-prost = { version = "0.14" }
+serde = { version = "1", features = ["derive"] }
+parking_lot = "0.12"
+prost = { version = "0.14" }
+uuid = { version = "1", features = ["v4"] }

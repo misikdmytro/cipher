@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = { workspace = true }
+apalis = { workspace = true }
+apalis-postgres = { workspace = true }
+async-trait = { workspace = true }
+proto = { path = "../proto" }
+tokio = { workspace = true }
+tonic = { workspace = true }

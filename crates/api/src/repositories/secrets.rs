@@ -36,6 +36,7 @@ pub enum AddSecretError {
     Infrastructure(anyhow::Error),
 }
 
+#[async_trait::async_trait]
 pub trait SecretsRepository: Send + Sync {
     async fn save_secret(&self, request: AddSecretRequest) -> Result<Secret, AddSecretError>;
 }
@@ -60,6 +61,7 @@ impl SecretsRepositoryImpl {
     }
 }
 
+#[async_trait::async_trait]
 impl SecretsRepository for SecretsRepositoryImpl {
     async fn save_secret(&self, request: AddSecretRequest) -> Result<Secret, AddSecretError> {
         diesel::insert_into(secrets_schema::table)

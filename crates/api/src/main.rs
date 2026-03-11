@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     let channel = endpoint.connect().await?;
     let scheduler_client = Arc::new(Mutex::new(SchedulerServiceClient::new(channel)));
 
-    let repository = new_secrets_repository(&config)?;
+    let repository = new_secrets_repository(&config).await?;
     let secrets_service = new_secrets_service(Box::new(repository), scheduler_client);
 
     let state = Arc::new(AppState {

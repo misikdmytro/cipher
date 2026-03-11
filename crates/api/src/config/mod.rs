@@ -1,4 +1,4 @@
-use config::{Config, Environment, File};
+use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -30,13 +30,14 @@ impl DatabaseConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GrpcClientConfig {
+    pub scheme: String,
     pub host: String,
     pub port: u16,
 }
 
 impl GrpcClientConfig {
     pub fn address(&self) -> String {
-        format!("{}:{}", self.host, self.port)
+        format!("{}://{}:{}", self.scheme, self.host, self.port)
     }
 }
 
@@ -44,15 +45,21 @@ impl GrpcClientConfig {
 #[error("failed to load configuration: {0}")]
 pub struct ConfigLoadError(anyhow::Error);
 
+impl From<ConfigError> for ConfigLoadError {
+    fn from(e: ConfigError) -> Self {
+        ConfigLoadError(e.into())
+    }
+}
+
 impl AppConfig {
     pub fn load() -> Result<Self, ConfigLoadError> {
         let config = Config::builder()
-            .add_source(File::with_name("config.toml"))
+            .add_source(File::with_name("api.config.toml"))
             .add_source(Environment::with_prefix("CIPHER").separator("_"))
             .build()
-            .map_err(|e| ConfigLoadError(e.into()))?
+            .map_err(ConfigLoadError::from)?
             .try_deserialize()
-            .map_err(|e| ConfigLoadError(e.into()))?;
+            .map_err(ConfigLoadError::from)?;
 
         Ok(config)
     }

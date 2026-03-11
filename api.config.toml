@@ -1,11 +1,12 @@
 [database]
-username = "postgres"
-password = "password"
+username = "cipher"
+password = "cipher"
 host = "localhost"
 port = 5432
 database = "cipher"
 use_ssl = false
 
 [scheduler]
+scheme = "http"
 host = "[::1]"
-port = 50002
+port = 50052

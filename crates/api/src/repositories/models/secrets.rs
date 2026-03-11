@@ -1,11 +1,7 @@
-use diesel::prelude::*;
+use sqlx::FromRow;
 use uuid::Uuid;
 
-use crate::repositories::models::schema::secrets;
-
-#[derive(Queryable, Selectable, Insertable, Debug, Clone)]
-#[diesel(table_name = secrets)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
+#[derive(FromRow, Debug, Clone)]
 pub struct Secret {
     pub id: Uuid,
     pub path: String,

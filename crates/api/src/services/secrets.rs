@@ -46,7 +46,7 @@ impl SecretsService for SecretsServiceImpl {
         scheduler
             .schedule_secret_rotation(ScheduleSecretRotationRequest {
                 secret_id: secret.id.to_string(),
-                cron_expression: "0 0 * * *".to_string(), // TODO: make this configurable
+                cron_expression: "0/5 * * * * * *".to_string(), // TODO: make this configurable
             })
             .await
             .map_err(|e| {

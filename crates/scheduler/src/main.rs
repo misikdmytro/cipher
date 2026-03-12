@@ -1,21 +1,61 @@
+use std::sync::Arc;
+
 use anyhow::Result;
+use apalis::prelude::*;
+use apalis_postgres::PostgresStorage;
 use proto::scheduler::scheduler_service_server::SchedulerServiceServer;
+use sqlx::postgres::PgPoolOptions;
+use tokio::sync::Mutex;
 use tonic::transport::Server;
 
-use crate::grpc::scheduler::new_scheduler_service;
+use crate::{
+    config::AppConfig,
+    grpc::scheduler::new_scheduler_service,
+    jobs::rotate_secret::RotateSecretJob,
+    workers::rotate_secret_worker::{RotateSecretsState, handle_rotate_secret},
+};
 
+mod config;
 mod grpc;
+mod jobs;
+mod workers;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let scheduler_server = new_scheduler_service();
-    let addr = "[::1]:50052".parse()?; // TODO: implement config here
-    let scheduler = SchedulerServiceServer::new(scheduler_server);
-    Server::builder()
-        .add_service(scheduler)
-        .serve(addr)
+    tracing_subscriber::fmt::init();
+
+    let config = AppConfig::load()?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(20)
+        .connect(&config.database.connection_string())
+        .await?;
+
+    apalis_postgres::PostgresStorage::<(), (), ()>::migrations()
+        .run(&pool)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to start gRPC server: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to run database migrations: {e}"))?;
+
+    let storage = PostgresStorage::<RotateSecretJob>::new(&pool);
+    let storage_ref = Arc::new(Mutex::new(storage.clone()));
+
+    let addr = config.grpc.bind_address().parse()?;
+    let scheduler = SchedulerServiceServer::new(new_scheduler_service(storage_ref.clone()));
+
+    tokio::select! {
+        result = Monitor::new().register(move |_| {
+            WorkerBuilder::new("rotate-secrets")
+                .backend(storage.clone())
+                .concurrency(config.worker.concurrency)
+                .data(RotateSecretsState { storage: storage_ref.clone() })
+                .build(handle_rotate_secret)
+        }).run() => {
+            result.map_err(|e| anyhow::anyhow!("apalis monitor failed: {e}"))?;
+        }
+        result = Server::builder().add_service(scheduler).serve(addr) => {
+            result.map_err(|e| anyhow::anyhow!("gRPC server failed: {e}"))?;
+        }
+    }
 
     Ok(())
 }

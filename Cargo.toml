@@ -11,8 +11,9 @@ resolver = "3"
 
 [workspace.dependencies]
 anyhow = "1"
-apalis = { version = "0.7" }
+apalis = { version = "1.0.0-rc.4" }
 apalis-postgres = { version = "1.0.0-rc.4" }
+cron = "0.15"
 async-trait = "0.1"
 axum = { version = "0.8" }
 chrono = "0.4"

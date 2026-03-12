@@ -3,10 +3,14 @@ username = "cipher"
 password = "cipher"
 host = "localhost"
 port = 5432
-database = "api"
+database = "scheduler"
 use_ssl = false
 
-[scheduler]
+[grpc]
 scheme = "http"
 host = "[::1]"
 port = 50052
+
+[worker]
+concurrency = 10
+poll_interval = 1000

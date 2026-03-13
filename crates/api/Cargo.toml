@@ -9,6 +9,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
 config = { workspace = true }
+cron = { workspace = true }
 interfaces = { path = "../interfaces" }
 proto = { path = "../proto" }
 serde = { workspace = true }

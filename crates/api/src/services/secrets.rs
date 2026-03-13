@@ -9,13 +9,13 @@ use tracing::error;
 use uuid::Uuid;
 
 use crate::{
-    repositories::secrets::{AddSecretRequest, SecretsRepository},
+    repositories::secrets::{AddSecretRequest, DeleteSecretRequest, SecretsRepository},
     services::types::{ServiceError, ServiceResult},
 };
 
 #[async_trait::async_trait]
 pub trait SecretsService {
-    async fn create_secret(&self, path: String) -> ServiceResult<Uuid>;
+    async fn create_secret(&self, path: String, cron_expression: String) -> ServiceResult<Uuid>;
 }
 
 struct SecretsServiceImpl {
@@ -35,25 +35,44 @@ pub fn new_secrets_service(
 
 #[async_trait::async_trait]
 impl SecretsService for SecretsServiceImpl {
-    async fn create_secret(&self, path: String) -> ServiceResult<Uuid> {
-        let request = AddSecretRequest { path };
+    async fn create_secret(&self, path: String, cron_expression: String) -> ServiceResult<Uuid> {
+        let request = AddSecretRequest {
+            path,
+            cron_expression: cron_expression.clone(),
+        };
         let secret = self.repository.save_secret(request).await.map_err(|e| {
             error!(error = ?e, "Failed to save secret");
-            ServiceError::PersistenceError("failed to save secret".to_string())
+            ServiceError::PersistenceError("failed to save secret".into())
         })?;
 
-        let mut scheduler = self.scheduler.lock().await;
-        scheduler
-            .schedule_secret_rotation(ScheduleSecretRotationRequest {
-                secret_id: secret.id.to_string(),
-                cron_expression: "0/5 * * * * * *".to_string(), // TODO: make this configurable
-            })
-            .await
-            .map_err(|e| {
-                error!(status = ?e, "Failed to schedule secret rotation");
-                ServiceError::Other(anyhow::anyhow!("failed to schedule secret rotation"))
-            })?;
+        let result = {
+            let mut scheduler = self.scheduler.lock().await;
+            scheduler
+                .schedule_secret_rotation(ScheduleSecretRotationRequest {
+                    secret_id: secret.id.to_string(),
+                    cron_expression,
+                })
+                .await
+        };
 
-        Ok(secret.id)
+        match result {
+            Ok(_) => Ok(secret.id),
+            Err(e) => {
+                error!(error = ?e, "Failed to schedule secret rotation, rolling back");
+
+                let request = DeleteSecretRequest { id: secret.id };
+                self.repository
+                    .delete_secret(request)
+                    .await
+                    .inspect_err(|e| {
+                        error!(error = ?e, "Failed to roll back secret after scheduling failure");
+                    })
+                    .ok();
+
+                Err(ServiceError::Other(
+                    "failed to schedule secret rotation".into(),
+                ))
+            }
+        }
     }
 }

@@ -7,6 +7,12 @@ use crate::{config::AppConfig, repositories::models::secrets::Secret as SecretMo
 #[derive(Debug, Clone)]
 pub struct AddSecretRequest {
     pub path: String,
+    pub cron_expression: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeleteSecretRequest {
+    pub id: uuid::Uuid,
 }
 
 #[derive(Debug, Error)]
@@ -25,9 +31,25 @@ impl From<sqlx::Error> for AddSecretError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum DeleteSecretError {
+    #[error("secret not found")]
+    NotFound,
+
+    #[error("infrastructure error: {0}")]
+    Infrastructure(anyhow::Error),
+}
+
+impl From<sqlx::Error> for DeleteSecretError {
+    fn from(e: sqlx::Error) -> Self {
+        DeleteSecretError::Infrastructure(e.into())
+    }
+}
+
 #[async_trait::async_trait]
 pub trait SecretsRepository: Send + Sync {
     async fn save_secret(&self, request: AddSecretRequest) -> Result<Secret, AddSecretError>;
+    async fn delete_secret(&self, request: DeleteSecretRequest) -> Result<(), DeleteSecretError>;
 }
 
 struct SecretsRepositoryImpl {
@@ -62,15 +84,31 @@ impl SecretsRepository for SecretsRepositoryImpl {
         let created_at = chrono::Utc::now().naive_utc();
 
         sqlx::query_as::<_, SecretModel>(
-            "INSERT INTO secrets (id, path, created_at, updated_at) VALUES ($1, $2, $3, $4) RETURNING *",
+            "INSERT INTO secrets (id, path, cron, created_at, updated_at) VALUES ($1, $2, $3, $4, $5) RETURNING *",
         )
         .bind(id)
         .bind(request.path)
+        .bind(request.cron_expression)
         .bind(created_at)
         .bind(None::<chrono::NaiveDateTime>)
         .fetch_one(&self.pool)
         .await
         .map_err(AddSecretError::from)
         .map(Secret::from)
+    }
+
+    async fn delete_secret(&self, request: DeleteSecretRequest) -> Result<(), DeleteSecretError> {
+        sqlx::query("DELETE FROM secrets WHERE id = $1")
+            .bind(request.id)
+            .execute(&self.pool)
+            .await
+            .map_err(DeleteSecretError::from)
+            .and_then(|result| {
+                if result.rows_affected() == 0 {
+                    Err(DeleteSecretError::NotFound)
+                } else {
+                    Ok(())
+                }
+            })
     }
 }

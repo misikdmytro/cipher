@@ -2,9 +2,21 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
-use validator::Validate;
+use validator::{Validate, ValidationError};
 
 use crate::{handlers::common::ErrorResponse, state::AppState};
+
+fn validate_cron(expr: &str) -> Result<(), ValidationError> {
+    expr.parse::<cron::Schedule>().map(|_| ()).map_err(|_| {
+        ValidationError::new("invalid_cron_expression").with_message(
+            format!(
+                "Invalid cron expression: '{}'. Allowed format: sec min hour dom month dow year",
+                expr
+            )
+            .into(),
+        )
+    })
+}
 
 /// Request payload for creating a new secret entry.
 #[derive(Deserialize, ToSchema, Validate)]
@@ -13,6 +25,11 @@ pub(in crate::handlers) struct SaveSecretRequest {
     #[schema(example = "prod/payments/stripe_api_key", min_length = 1)]
     #[validate(length(min = 1, max = 255))]
     pub path: String,
+
+    /// Cron expression defining the rotation schedule (7-field: sec min hour dom month dow year).
+    #[schema(example = "0 0 * * * * *")]
+    #[validate(length(min = 1, max = 255), custom(function = "validate_cron"))]
+    pub cron_expression: String,
 }
 
 /// Response returned after successful secret creation.
@@ -49,7 +66,11 @@ pub(in crate::handlers) async fn save_secret(
         }
     }
 
-    match state.secrets_service.create_secret(body.path).await {
+    match state
+        .secrets_service
+        .create_secret(body.path, body.cron_expression)
+        .await
+    {
         Ok(id) => (StatusCode::CREATED, Json(SaveSecretResponse { id })).into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "Unexpected error in save_secret");

@@ -23,8 +23,7 @@ async fn main() -> Result<()> {
 
     let config = AppConfig::load()?;
 
-    let endpoint = Endpoint::new(config.scheduler.address())?;
-    let channel = endpoint.connect().await?;
+    let channel = Endpoint::new(config.scheduler.address())?.connect_lazy();
     let scheduler_client = Arc::new(Mutex::new(SchedulerServiceClient::new(channel)));
 
     let repository = new_secrets_repository(&config).await?;

@@ -6,7 +6,7 @@ use tokio::net::TcpListener;
 use crate::{handlers, state::AppState};
 
 pub async fn serve(state: Arc<AppState>) -> Result<()> {
-    let address = state.config.api.address();
+    let address = state.config.api.address_without_scheme();
     let router = handlers::router(state);
 
     // TODO: configure it

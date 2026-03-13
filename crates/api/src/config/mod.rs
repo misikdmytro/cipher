@@ -40,6 +40,10 @@ impl HostingConfig {
     pub fn address(&self) -> String {
         format!("{}://{}:{}", self.scheme, self.host, self.port)
     }
+
+    pub fn address_without_scheme(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
 }
 
 #[derive(Debug, Error)]

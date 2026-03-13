@@ -2,14 +2,16 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
+use validator::Validate;
 
 use crate::{handlers::common::ErrorResponse, services::types::ServiceError, state::AppState};
 
 /// Request payload for creating a new secret entry.
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, ToSchema, Validate)]
 pub(in crate::handlers) struct SaveSecretRequest {
     /// Logical path used by the downstream scheduler/rotator services.
     #[schema(example = "prod/payments/stripe_api_key", min_length = 1)]
+    #[validate(length(min = 1, max = 255))]
     pub path: String,
 }
 
@@ -39,6 +41,14 @@ pub(in crate::handlers) async fn save_secret(
     State(state): State<Arc<AppState>>,
     Json(body): Json<SaveSecretRequest>,
 ) -> impl IntoResponse {
+    match body.validate() {
+        Ok(_) => (),
+        Err(e) => {
+            let error_response: ErrorResponse = e.into();
+            return (StatusCode::BAD_REQUEST, Json(error_response)).into_response();
+        }
+    }
+
     match state.secrets_service.create_secret(body.path).await {
         Ok(id) => (StatusCode::CREATED, Json(SaveSecretResponse { id })).into_response(),
         Err(ServiceError::ValidationError(message)) => {

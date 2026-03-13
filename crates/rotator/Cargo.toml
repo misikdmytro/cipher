@@ -7,5 +7,5 @@ edition = "2024"
 anyhow = { workspace = true }
 proto = { path = "../proto" }
 thiserror = { workspace = true }
-tonic = { workspace = true }
 tokio = { workspace = true }
+tonic = { workspace = true }

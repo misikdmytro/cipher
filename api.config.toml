@@ -10,3 +10,8 @@ use_ssl = false
 scheme = "http"
 host = "[::1]"
 port = 50052
+
+[api]
+scheme = "http"
+host = "0.0.0.0"
+port = 3000

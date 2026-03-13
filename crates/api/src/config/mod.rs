@@ -5,7 +5,8 @@ use thiserror::Error;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     pub database: DatabaseConfig,
-    pub scheduler: GrpcClientConfig,
+    pub scheduler: HostingConfig,
+    pub api: HostingConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -29,13 +30,13 @@ impl DatabaseConfig {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct GrpcClientConfig {
+pub struct HostingConfig {
     pub scheme: String,
     pub host: String,
     pub port: u16,
 }
 
-impl GrpcClientConfig {
+impl HostingConfig {
     pub fn address(&self) -> String {
         format!("{}://{}:{}", self.scheme, self.host, self.port)
     }

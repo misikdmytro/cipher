@@ -31,6 +31,7 @@ async fn main() -> Result<()> {
     let secrets_service = new_secrets_service(Box::new(repository), scheduler_client);
 
     let state = Arc::new(AppState {
+        config,
         secrets_service: Box::new(secrets_service),
     });
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::{handlers::common::ErrorResponse, services::types::ServiceError, state::AppState};
+use crate::{handlers::common::ErrorResponse, state::AppState};
 
 /// Request payload for creating a new secret entry.
 #[derive(Deserialize, ToSchema, Validate)]
@@ -51,12 +51,6 @@ pub(in crate::handlers) async fn save_secret(
 
     match state.secrets_service.create_secret(body.path).await {
         Ok(id) => (StatusCode::CREATED, Json(SaveSecretResponse { id })).into_response(),
-        Err(ServiceError::ValidationError(message)) => {
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse { message })).into_response()
-        }
-        Err(ServiceError::NotFound(message)) => {
-            (StatusCode::NOT_FOUND, Json(ErrorResponse { message })).into_response()
-        }
         Err(e) => {
             tracing::error!(error = ?e, "Unexpected error in save_secret");
             (

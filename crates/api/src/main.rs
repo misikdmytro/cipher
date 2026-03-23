@@ -1,9 +1,4 @@
 mod api;
-mod config;
-mod handlers;
-mod repositories;
-mod services;
-mod state;
 
 use std::sync::Arc;
 
@@ -12,10 +7,11 @@ use proto::scheduler::scheduler_service_client::SchedulerServiceClient;
 use tokio::sync::Mutex;
 use tonic::transport::Endpoint;
 
-use config::AppConfig;
-use repositories::secrets::new_secrets_repository;
-use services::secrets::new_secrets_service;
-use state::AppState;
+use ::api::config::AppConfig;
+use ::api::handlers;
+use ::api::repositories::secrets::new_secrets_repository;
+use ::api::services::secrets::new_secrets_service;
+use ::api::state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,11 +26,13 @@ async fn main() -> Result<()> {
     let secrets_service = new_secrets_service(Box::new(repository), scheduler_client);
 
     let state = Arc::new(AppState {
-        config,
+        config: config.clone(),
         secrets_service: Box::new(secrets_service),
     });
 
-    api::serve(state).await?;
+    let address = state.config.api.address_without_scheme();
+    let router = handlers::router(state);
+    api::serve(router, &address).await?;
 
     Ok(())
 }

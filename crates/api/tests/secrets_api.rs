@@ -101,10 +101,11 @@ async fn create_secret_with_invalid_body_returns_400(
 }
 
 #[rstest]
-#[case::missing_field(r#"{"path": "some/valid/path"}"#)]
-#[case::malformed_json(r#"{ bad json }"#)]
+#[case::missing_field(r#"{"path": "some/valid/path"}"#, 422)]
+#[case::wrong_field_type(r#"{"path": 123, "cron_expression": "0 0 0 * * * *"}"#, 422)]
+#[case::malformed_json(r#"{ bad json }"#, 400)]
 #[tokio::test]
-async fn create_secret_with_unparseable_body_returns_422(#[case] body: &str) {
+async fn create_secret_with_malformed_body(#[case] body: &str, #[case] expected_status: u16) {
     let app = TestApp::spawn().await;
 
     let response = app
@@ -116,7 +117,7 @@ async fn create_secret_with_unparseable_body_returns_422(#[case] body: &str) {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), 422);
+    assert_eq!(response.status(), expected_status);
 }
 
 #[tokio::test]

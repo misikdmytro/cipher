@@ -72,7 +72,7 @@ impl TestApp {
         let mock_clone = Arc::clone(&mock);
         tokio::spawn(async move {
             tonic::transport::Server::builder()
-                .add_service(SchedulerServiceServer::new(mock_clone))
+                .add_service(SchedulerServiceServer::from_arc(mock_clone))
                 .serve_with_incoming(TcpListenerStream::new(grpc_listener))
                 .await
                 .unwrap();

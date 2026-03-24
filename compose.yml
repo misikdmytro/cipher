@@ -11,5 +11,14 @@ services:
       - db_data:/var/lib/postgresql
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: cipher
+      RABBITMQ_DEFAULT_PASS: cipher
+
 volumes:
   db_data:

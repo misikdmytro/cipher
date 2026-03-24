@@ -7,6 +7,35 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub grpc: HostingConfig,
     pub worker: WorkerConfig,
+    pub rabbitmq: RabbitMqConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RabbitMqConfig {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+}
+
+impl Default for RabbitMqConfig {
+    fn default() -> Self {
+        Self {
+            host: "localhost".to_string(),
+            port: 5672,
+            username: "cipher".to_string(),
+            password: "cipher".to_string(),
+        }
+    }
+}
+
+impl RabbitMqConfig {
+    pub fn connection_string(&self) -> String {
+        format!(
+            "amqp://{}:{}@{}:{}/%2f",
+            self.username, self.password, self.host, self.port
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,14 +136,12 @@ impl From<ConfigError> for ConfigLoadError {
 
 impl AppConfig {
     pub fn load() -> Result<Self, ConfigLoadError> {
-        let config = Config::builder()
+        Config::builder()
             .add_source(File::with_name("scheduler.config.toml"))
             .add_source(Environment::with_prefix("CIPHER").separator("_"))
             .build()
             .map_err(ConfigLoadError::from)?
             .try_deserialize()
-            .map_err(ConfigLoadError::from)?;
-
-        Ok(config)
+            .map_err(ConfigLoadError::from)
     }
 }

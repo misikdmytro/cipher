@@ -1,17 +1,18 @@
-mod api;
+mod http;
 
 use std::sync::Arc;
 
 use anyhow::Result;
+use api::config::AppConfig;
+use api::grpc;
+use api::grpc::api_service::new_api_grpc_service;
+use api::handlers;
+use api::repositories::secrets::new_secrets_repository;
+use api::services::secrets::new_secrets_service;
+use api::state::AppState;
 use proto::scheduler::scheduler_service_client::SchedulerServiceClient;
 use tokio::sync::Mutex;
 use tonic::transport::Endpoint;
-
-use ::api::config::AppConfig;
-use ::api::handlers;
-use ::api::repositories::secrets::new_secrets_repository;
-use ::api::services::secrets::new_secrets_service;
-use ::api::state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,9 +31,16 @@ async fn main() -> Result<()> {
         secrets_service: Box::new(secrets_service),
     });
 
-    let address = state.config.api.address_without_scheme();
-    let router = handlers::router(state);
-    api::serve(router, &address).await?;
+    let http_address = state.config.api.address_without_scheme();
+    let grpc_address = config.grpc.address_without_scheme();
+
+    let router = handlers::router(state.clone());
+    let grpc_svc = new_api_grpc_service(state);
+
+    tokio::select! {
+        result = http::serve(router, &http_address) => result?,
+        result = grpc::serve(grpc_svc, &grpc_address) => result?,
+    }
 
     Ok(())
 }

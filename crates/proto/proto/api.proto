@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package api;
+
+// Request message for retrieving a secret by its ID
+message GetSecretRequest {
+  // The ID of the secret to retrieve
+  string secret_id = 1;
+}
+
+// Response message containing the secret details
+message GetSecretResponse {
+  // The ID of the secret
+  string secret_id = 1;
+
+  // The value of the secret
+  string path = 2;
+}
+
+// The API service definition.
+service ApiService {
+  // GetSecret retrieves a secret by its ID.
+  rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
+}

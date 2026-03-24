@@ -14,3 +14,9 @@ port = 50052
 [worker]
 concurrency = 10
 poll_interval = 1000
+
+[rabbitmq]
+host = "localhost"
+port = 5672
+username = "cipher"
+password = "cipher"

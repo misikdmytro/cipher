@@ -1,79 +1,50 @@
-use std::sync::{Arc, Mutex};
+pub mod mocks;
+
+use std::sync::Arc;
 
 use api::config::{AppConfig, DatabaseConfig, HostingConfig};
+use api::grpc::api_service::new_api_grpc_service;
 use api::handlers;
 use api::repositories::secrets::new_secrets_repository;
 use api::services::secrets::new_secrets_service;
 use api::state::AppState;
-use proto::scheduler::{
-    ScheduleSecretRotationRequest,
-    scheduler_service_server::{SchedulerService, SchedulerServiceServer},
-};
+use mocks::MockSchedulerService;
+use proto::api::api_service_client::ApiServiceClient;
+use proto::api::api_service_server::ApiServiceServer;
+use proto::scheduler::scheduler_service_server::SchedulerServiceServer;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
-
-pub struct MockSchedulerService {
-    should_fail: Mutex<bool>,
-    received: Mutex<Vec<ScheduleSecretRotationRequest>>,
-}
-
-impl MockSchedulerService {
-    pub fn new(should_fail: bool) -> Self {
-        Self {
-            should_fail: Mutex::new(should_fail),
-            received: Mutex::new(Vec::new()),
-        }
-    }
-
-    pub fn received_requests(&self) -> Vec<ScheduleSecretRotationRequest> {
-        self.received.lock().unwrap().clone()
-    }
-}
-
-#[tonic::async_trait]
-impl SchedulerService for MockSchedulerService {
-    async fn schedule_secret_rotation(
-        &self,
-        request: tonic::Request<ScheduleSecretRotationRequest>,
-    ) -> Result<tonic::Response<()>, tonic::Status> {
-        let req = request.into_inner();
-        self.received.lock().unwrap().push(req);
-
-        if *self.should_fail.lock().unwrap() {
-            return Err(tonic::Status::internal("mock scheduler failure"));
-        }
-
-        Ok(tonic::Response::new(()))
-    }
-}
+use tonic::transport::Channel;
 
 pub struct TestApp {
     pub base_url: String,
     pub http: reqwest::Client,
     pub db: sqlx::PgPool,
     pub scheduler: Arc<MockSchedulerService>,
+    pub api_grpc_client: ApiServiceClient<Channel>,
 }
 
 impl TestApp {
     pub async fn spawn() -> Self {
-        Self::build(false).await
+        Self::build(MockSchedulerService::success()).await
     }
 
     pub async fn spawn_with_failing_scheduler() -> Self {
-        Self::build(true).await
+        Self::build(MockSchedulerService::failing()).await
     }
 
-    async fn build(scheduler_fails: bool) -> Self {
-        let mock = Arc::new(MockSchedulerService::new(scheduler_fails));
+    async fn build(scheduler_mock: MockSchedulerService) -> Self {
+        let mock = Arc::new(scheduler_mock);
 
-        let grpc_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let grpc_port = grpc_listener.local_addr().unwrap().port();
+        // Start mock scheduler gRPC server
+        let scheduler_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let scheduler_port = scheduler_listener.local_addr().unwrap().port();
 
         let mock_clone = Arc::clone(&mock);
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(SchedulerServiceServer::from_arc(mock_clone))
-                .serve_with_incoming(TcpListenerStream::new(grpc_listener))
+                .serve_with_incoming(TcpListenerStream::new(scheduler_listener))
                 .await
                 .unwrap();
         });
@@ -81,15 +52,11 @@ impl TestApp {
         let config = AppConfig {
             database: test_db_config(),
             scheduler: HostingConfig {
-                scheme: "http".into(),
-                host: "127.0.0.1".into(),
-                port: grpc_port,
+                port: scheduler_port,
+                ..Default::default()
             },
-            api: HostingConfig {
-                scheme: "http".into(),
-                host: "127.0.0.1".into(),
-                port: 0,
-            },
+            api: Default::default(),
+            grpc: Default::default(),
         };
 
         let repository = new_secrets_repository(&config)
@@ -100,8 +67,8 @@ impl TestApp {
             .await
             .unwrap();
 
-        let grpc_endpoint = format!("http://127.0.0.1:{}", grpc_port);
-        let channel = tonic::transport::Endpoint::new(grpc_endpoint)
+        let scheduler_endpoint = format!("http://127.0.0.1:{}", scheduler_port);
+        let channel = tonic::transport::Endpoint::new(scheduler_endpoint)
             .unwrap()
             .connect_lazy();
         let scheduler_client = Arc::new(tokio::sync::Mutex::new(
@@ -114,6 +81,26 @@ impl TestApp {
             secrets_service: Box::new(secrets_service),
         });
 
+        // Start API gRPC server
+        let api_grpc_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api_grpc_port = api_grpc_listener.local_addr().unwrap().port();
+
+        let grpc_svc = new_api_grpc_service(state.clone());
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(ApiServiceServer::new(grpc_svc))
+                .serve_with_incoming(TcpListenerStream::new(api_grpc_listener))
+                .await
+                .unwrap();
+        });
+
+        let api_grpc_endpoint = format!("http://127.0.0.1:{}", api_grpc_port);
+        let api_grpc_channel = tonic::transport::Endpoint::new(api_grpc_endpoint)
+            .unwrap()
+            .connect_lazy();
+        let api_grpc_client = ApiServiceClient::new(api_grpc_channel);
+
+        // Start HTTP server
         let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let http_port = http_listener.local_addr().unwrap().port();
         let base_url = format!("http://127.0.0.1:{}", http_port);
@@ -128,6 +115,7 @@ impl TestApp {
             http: reqwest::Client::new(),
             db,
             scheduler: mock,
+            api_grpc_client,
         }
     }
 

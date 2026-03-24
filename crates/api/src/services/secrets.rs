@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use interfaces::secrets::Secret;
 use proto::scheduler::{
     ScheduleSecretRotationRequest, scheduler_service_client::SchedulerServiceClient,
 };
@@ -9,12 +10,15 @@ use tracing::error;
 use uuid::Uuid;
 
 use crate::{
-    repositories::secrets::{AddSecretRequest, DeleteSecretRequest, SecretsRepository},
+    repositories::secrets::{
+        AddSecretRequest, DeleteSecretRequest, GetSecretError, SecretsRepository,
+    },
     services::types::{ServiceError, ServiceResult},
 };
 
 #[async_trait::async_trait]
-pub trait SecretsService {
+pub trait SecretsService: Send + Sync {
+    async fn get_secret_by_id(&self, id: Uuid) -> ServiceResult<Secret>;
     async fn create_secret(&self, path: String, cron_expression: String) -> ServiceResult<Uuid>;
 }
 
@@ -26,7 +30,7 @@ struct SecretsServiceImpl {
 pub fn new_secrets_service(
     repository: Box<dyn SecretsRepository>,
     scheduler: Arc<Mutex<SchedulerServiceClient<Channel>>>,
-) -> impl SecretsService + Send + Sync + 'static {
+) -> impl SecretsService + 'static {
     SecretsServiceImpl {
         repository,
         scheduler,
@@ -35,6 +39,19 @@ pub fn new_secrets_service(
 
 #[async_trait::async_trait]
 impl SecretsService for SecretsServiceImpl {
+    async fn get_secret_by_id(&self, id: Uuid) -> ServiceResult<Secret> {
+        self.repository
+            .get_secret_by_id(id)
+            .await
+            .map_err(|e| match e {
+                GetSecretError::NotFound => ServiceError::NotFound,
+                GetSecretError::Infrastructure(e) => {
+                    error!(error = ?e, "Database error while fetching secret");
+                    ServiceError::PersistenceError("database error".into())
+                }
+            })
+    }
+
     async fn create_secret(&self, path: String, cron_expression: String) -> ServiceResult<Uuid> {
         let request = AddSecretRequest {
             path,

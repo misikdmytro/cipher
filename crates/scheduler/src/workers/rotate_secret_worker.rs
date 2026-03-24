@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::ops::Deref;
 use std::time::SystemTime;
 use std::{str::FromStr, sync::Arc};
@@ -12,33 +11,27 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 use crate::jobs::rotate_secret::RotateSecretJob;
+use crate::services::publisher::{PublishError, RotationPublisher};
 
 #[derive(Clone)]
 pub struct RotateSecretsState {
     pub storage: Arc<Mutex<PostgresStorage<RotateSecretJob>>>,
+    pub publisher: Arc<dyn RotationPublisher>,
 }
 
 #[derive(Debug, Error)]
 pub enum RotateSecretError {
+    #[error("invalid cron expression: {0}")]
     InvalidCronExpression(#[from] cron::error::Error),
-    NoFutureOccurrences,
-    StorageError,
-}
 
-impl Display for RotateSecretError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RotateSecretError::InvalidCronExpression(e) => {
-                write!(f, "Invalid cron expression: {e}")
-            }
-            RotateSecretError::NoFutureOccurrences => {
-                write!(f, "Cron expression does not have any future occurrences")
-            }
-            RotateSecretError::StorageError => {
-                write!(f, "Failed to store the scheduled job")
-            }
-        }
-    }
+    #[error("cron expression does not have any future occurrences")]
+    NoFutureOccurrences,
+
+    #[error("failed to store the scheduled job")]
+    StorageError,
+
+    #[error("publish error: {0}")]
+    PublishError(#[from] PublishError),
 }
 
 pub async fn handle_rotate_secret(
@@ -47,7 +40,7 @@ pub async fn handle_rotate_secret(
 ) -> Result<(), RotateSecretError> {
     info!(secret_id = %job.secret_id, "Executing secret rotation");
 
-    // TODO: trigger rotation via rotator gRPC / AMQP
+    state.publisher.publish(job.secret_id).await?;
 
     match reschedule(job, state.deref()).await {
         Ok(_) => Ok(()),

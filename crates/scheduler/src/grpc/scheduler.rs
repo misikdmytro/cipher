@@ -23,7 +23,7 @@ pub fn new_scheduler_service(
     SchedulerServer { storage }
 }
 
-#[async_trait::async_trait]
+#[tonic::async_trait]
 impl SchedulerService for SchedulerServer {
     async fn schedule_secret_rotation(
         &self,

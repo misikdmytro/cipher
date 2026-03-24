@@ -46,10 +46,26 @@ impl From<sqlx::Error> for DeleteSecretError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum GetSecretError {
+    #[error("secret not found")]
+    NotFound,
+
+    #[error("infrastructure error: {0}")]
+    Infrastructure(anyhow::Error),
+}
+
+impl From<sqlx::Error> for GetSecretError {
+    fn from(e: sqlx::Error) -> Self {
+        GetSecretError::Infrastructure(e.into())
+    }
+}
+
 #[async_trait::async_trait]
 pub trait SecretsRepository: Send + Sync {
     async fn save_secret(&self, request: AddSecretRequest) -> Result<Secret, AddSecretError>;
     async fn delete_secret(&self, request: DeleteSecretRequest) -> Result<(), DeleteSecretError>;
+    async fn get_secret_by_id(&self, id: uuid::Uuid) -> Result<Secret, GetSecretError>;
 }
 
 struct SecretsRepositoryImpl {
@@ -110,5 +126,16 @@ impl SecretsRepository for SecretsRepositoryImpl {
                     Ok(())
                 }
             })
+    }
+
+    async fn get_secret_by_id(&self, id: uuid::Uuid) -> Result<Secret, GetSecretError> {
+        sqlx::query_as::<_, SecretModel>(
+            "SELECT id, path, created_at, updated_at FROM secrets WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(GetSecretError::from)
+        .and_then(|opt| opt.map(Secret::from).ok_or(GetSecretError::NotFound))
     }
 }

@@ -1,0 +1,10 @@
+[rabbitmq]
+host = "localhost"
+port = 5672
+username = "cipher"
+password = "cipher"
+
+[api]
+scheme = "http"
+host = "[::1]"
+port = 50051

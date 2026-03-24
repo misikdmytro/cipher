@@ -11,8 +11,11 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 config = { workspace = true }
 cron = { workspace = true }
+interfaces = { path = "../interfaces" }
+lapin = { workspace = true }
 proto = { path = "../proto" }
 serde = { workspace = true }
+serde_json = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

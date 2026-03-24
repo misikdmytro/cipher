@@ -3,22 +3,22 @@ use std::sync::Arc;
 use anyhow::Result;
 use apalis::prelude::*;
 use apalis_postgres::PostgresStorage;
+use lapin::{
+    Connection, ConnectionProperties, ExchangeKind, options::ExchangeDeclareOptions,
+    types::FieldTable,
+};
 use proto::scheduler::scheduler_service_server::SchedulerServiceServer;
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Mutex;
 use tonic::transport::Server;
 
-use crate::{
+use scheduler::{
     config::AppConfig,
     grpc::scheduler::new_scheduler_service,
     jobs::rotate_secret::RotateSecretJob,
+    services::publisher::new_rotation_publisher,
     workers::rotate_secret_worker::{RotateSecretsState, handle_rotate_secret},
 };
-
-mod config;
-mod grpc;
-mod jobs;
-mod workers;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -39,6 +39,26 @@ async fn main() -> Result<()> {
     let storage = PostgresStorage::<RotateSecretJob>::new(&pool);
     let storage_ref = Arc::new(Mutex::new(storage.clone()));
 
+    let amqp_conn = Connection::connect(
+        &config.rabbitmq.connection_string(),
+        ConnectionProperties::default(),
+    )
+    .await?;
+    let amqp_channel = Arc::new(amqp_conn.create_channel().await?);
+    amqp_channel
+        .exchange_declare(
+            "rotation".into(),
+            ExchangeKind::Topic,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
+    let publisher = Arc::new(new_rotation_publisher(amqp_channel));
+
     let addr = config.grpc.bind_address().parse()?;
     let scheduler = SchedulerServiceServer::new(new_scheduler_service(storage_ref.clone()));
 
@@ -47,7 +67,7 @@ async fn main() -> Result<()> {
             WorkerBuilder::new("rotate-secrets")
                 .backend(storage.clone())
                 .concurrency(config.worker.concurrency)
-                .data(RotateSecretsState { storage: storage_ref.clone() })
+                .data(RotateSecretsState { storage: storage_ref.clone(), publisher: publisher.clone() })
                 .build(handle_rotate_secret)
         }).run() => {
             result.map_err(|e| anyhow::anyhow!("apalis monitor failed: {e}"))?;

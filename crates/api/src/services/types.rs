@@ -5,6 +5,9 @@ pub enum ServiceError {
     #[error("persistence error: {0}")]
     PersistenceError(String),
 
+    #[error("not found")]
+    NotFound,
+
     #[error("other error: {0}")]
     Other(String),
 }

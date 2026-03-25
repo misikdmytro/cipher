@@ -3,10 +3,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use interfaces::events::rotation::RotationScheduled;
 use lapin::{
-    Connection, ConnectionProperties, ExchangeKind,
     options::{
-        BasicAckOptions, BasicConsumeOptions, BasicNackOptions, ExchangeDeclareOptions,
-        QueueBindOptions, QueueDeclareOptions,
+        BasicAckOptions, BasicConsumeOptions, BasicNackOptions, QueueBindOptions,
+        QueueDeclareOptions,
     },
     types::FieldTable,
 };
@@ -14,28 +13,13 @@ use tokio_stream::StreamExt;
 use tracing::{error, info};
 use uuid::Uuid;
 
+use crate::services::publisher::RotationEventPublisher;
+use crate::services::rotation::RotationService;
 use crate::services::types::ServiceError;
 use crate::state::AppState;
 
 pub async fn serve(state: Arc<AppState>) -> Result<()> {
-    let conn = Connection::connect(
-        &state.config.rabbitmq.connection_string(),
-        ConnectionProperties::default(),
-    )
-    .await?;
-    let channel = conn.create_channel().await?;
-
-    channel
-        .exchange_declare(
-            "rotation".into(),
-            ExchangeKind::Topic,
-            ExchangeDeclareOptions {
-                durable: true,
-                ..Default::default()
-            },
-            FieldTable::default(),
-        )
-        .await?;
+    let channel = &state.amqp_channel;
 
     channel
         .queue_declare(
@@ -91,28 +75,93 @@ async fn handle_delivery(state: &AppState, delivery: &lapin::message::Delivery) 
 
     info!(secret_id = %secret_id, "Processing rotation message");
 
+    if let Err(e) = state.publisher.publish_started(secret_id).await {
+        error!(error = ?e, "Failed to publish rotation.started");
+        nack(delivery).await;
+        return;
+    }
+
     match state.rotation_service.rotate(secret_id).await {
         Ok(()) => {
-            if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-                error!(error = ?e, "Failed to ack delivery");
+            if let Err(e) = state.publisher.publish_done(secret_id).await {
+                error!(error = ?e, "Failed to publish rotation.done");
             }
+            ack(delivery).await;
         }
         Err(ServiceError::NotFound) => {
             error!(secret_id = %secret_id, "Secret not found, discarding message");
-            if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-                error!(error = ?e, "Failed to ack delivery");
+            if let Err(e) = state.publisher.publish_done(secret_id).await {
+                error!(error = ?e, "Failed to publish rotation.done");
             }
+            ack(delivery).await;
         }
         Err(e) => {
             error!(error = ?e, "Rotation failed");
+            if let Err(e_pub) = state
+                .publisher
+                .publish_failed(secret_id, e.to_string())
+                .await
+            {
+                error!(error = ?e_pub, "Failed to publish rotation.failed");
+            }
             nack(delivery).await;
         }
     }
 }
 
+pub async fn process_rotation(
+    secret_id: Uuid,
+    rotation_service: &dyn RotationService,
+    publisher: &dyn RotationEventPublisher,
+) -> Result<(), ProcessError> {
+    publisher
+        .publish_started(secret_id)
+        .await
+        .map_err(ProcessError::Publish)?;
+
+    match rotation_service.rotate(secret_id).await {
+        Ok(()) => {
+            if let Err(e) = publisher.publish_done(secret_id).await {
+                error!(error = ?e, "Failed to publish rotation.done");
+            }
+            Ok(())
+        }
+        Err(ServiceError::NotFound) => {
+            if let Err(e) = publisher.publish_done(secret_id).await {
+                error!(error = ?e, "Failed to publish rotation.done");
+            }
+            Err(ProcessError::NotFound)
+        }
+        Err(e) => {
+            if let Err(e_pub) = publisher.publish_failed(secret_id, e.to_string()).await {
+                error!(error = ?e_pub, "Failed to publish rotation.failed");
+            }
+            Err(ProcessError::Rotation(e))
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProcessError {
+    #[error("publish error: {0}")]
+    Publish(#[source] crate::services::publisher::PublishError),
+
+    #[error("secret not found")]
+    NotFound,
+
+    #[error("rotation error: {0}")]
+    Rotation(#[source] ServiceError),
+}
+
 fn parse_message(delivery: &lapin::message::Delivery) -> Result<Uuid> {
     let event: RotationScheduled = serde_json::from_slice(&delivery.data)?;
     Ok(event.secret_id)
+}
+
+async fn ack(delivery: &lapin::message::Delivery) {
+    if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
+        error!(error = ?e, "Failed to ack delivery");
+    }
 }
 
 async fn nack(delivery: &lapin::message::Delivery) {

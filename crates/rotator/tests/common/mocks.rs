@@ -2,8 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use rotator::helpers::aws::{AwsSecretError, AwsSecretsClient};
 use rotator::helpers::generator::SecretGenerator;
+use rotator::services::publisher::{PublishError, RotationEventPublisher};
 
 use proto::api::{GetSecretRequest, GetSecretResponse, api_service_server::ApiService};
+use uuid::Uuid;
 
 pub struct MockApiService {
     responses: Mutex<Vec<Result<GetSecretResponse, tonic::Status>>>,
@@ -161,5 +163,81 @@ impl MockSecretGenerator {
 impl SecretGenerator for MockSecretGenerator {
     fn generate(&self) -> String {
         self.value.clone()
+    }
+}
+
+#[derive(Clone)]
+pub struct MockRotationEventPublisher {
+    inner: Arc<MockRotationEventPublisherInner>,
+}
+
+struct MockRotationEventPublisherInner {
+    started_calls: Mutex<Vec<Uuid>>,
+    done_calls: Mutex<Vec<Uuid>>,
+    failed_calls: Mutex<Vec<(Uuid, String)>>,
+    started_should_fail: bool,
+}
+
+impl MockRotationEventPublisher {
+    pub fn success() -> Self {
+        Self {
+            inner: Arc::new(MockRotationEventPublisherInner {
+                started_calls: Mutex::new(Vec::new()),
+                done_calls: Mutex::new(Vec::new()),
+                failed_calls: Mutex::new(Vec::new()),
+                started_should_fail: false,
+            }),
+        }
+    }
+
+    pub fn started_fails() -> Self {
+        Self {
+            inner: Arc::new(MockRotationEventPublisherInner {
+                started_calls: Mutex::new(Vec::new()),
+                done_calls: Mutex::new(Vec::new()),
+                failed_calls: Mutex::new(Vec::new()),
+                started_should_fail: true,
+            }),
+        }
+    }
+
+    pub fn started_calls(&self) -> Vec<Uuid> {
+        self.inner.started_calls.lock().unwrap().clone()
+    }
+
+    pub fn done_calls(&self) -> Vec<Uuid> {
+        self.inner.done_calls.lock().unwrap().clone()
+    }
+
+    pub fn failed_calls(&self) -> Vec<(Uuid, String)> {
+        self.inner.failed_calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl RotationEventPublisher for MockRotationEventPublisher {
+    async fn publish_started(&self, secret_id: Uuid) -> Result<(), PublishError> {
+        self.inner.started_calls.lock().unwrap().push(secret_id);
+
+        if self.inner.started_should_fail {
+            return Err(PublishError::Serialization(
+                serde_json::from_str::<()>("invalid").unwrap_err(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn publish_done(&self, secret_id: Uuid) -> Result<(), PublishError> {
+        self.inner.done_calls.lock().unwrap().push(secret_id);
+        Ok(())
+    }
+
+    async fn publish_failed(&self, secret_id: Uuid, error: String) -> Result<(), PublishError> {
+        self.inner
+            .failed_calls
+            .lock()
+            .unwrap()
+            .push((secret_id, error));
+        Ok(())
     }
 }

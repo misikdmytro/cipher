@@ -3,16 +3,13 @@ use std::sync::Arc;
 use anyhow::Result;
 use apalis::prelude::*;
 use apalis_postgres::PostgresStorage;
-use lapin::{
-    Connection, ConnectionProperties, ExchangeKind, options::ExchangeDeclareOptions,
-    types::FieldTable,
-};
 use proto::scheduler::scheduler_service_server::SchedulerServiceServer;
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Mutex;
 use tonic::transport::Server;
 
 use scheduler::{
+    amqp,
     config::AppConfig,
     grpc::scheduler::new_scheduler_service,
     jobs::rotate_secret::RotateSecretJob,
@@ -39,23 +36,7 @@ async fn main() -> Result<()> {
     let storage = PostgresStorage::<RotateSecretJob>::new(&pool);
     let storage_ref = Arc::new(Mutex::new(storage.clone()));
 
-    let amqp_conn = Connection::connect(
-        &config.rabbitmq.connection_string(),
-        ConnectionProperties::default(),
-    )
-    .await?;
-    let amqp_channel = Arc::new(amqp_conn.create_channel().await?);
-    amqp_channel
-        .exchange_declare(
-            "rotation".into(),
-            ExchangeKind::Topic,
-            ExchangeDeclareOptions {
-                durable: true,
-                ..Default::default()
-            },
-            FieldTable::default(),
-        )
-        .await?;
+    let amqp_channel = amqp::connect(&config.rabbitmq).await?;
 
     let publisher = Arc::new(new_rotation_publisher(amqp_channel));
 

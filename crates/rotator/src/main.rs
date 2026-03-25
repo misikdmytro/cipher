@@ -3,10 +3,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use aws_config::BehaviorVersion;
 use proto::api::api_service_client::ApiServiceClient;
+use rotator::amqp;
 use rotator::config::AppConfig;
 use rotator::consumer;
 use rotator::helpers::aws::new_aws_secrets_client;
 use rotator::helpers::generator::RandomHexGenerator;
+use rotator::services::publisher::new_rotation_event_publisher;
 use rotator::services::rotation::new_rotation_service;
 use rotator::state::AppState;
 use tonic::transport::Endpoint;
@@ -28,9 +30,14 @@ async fn main() -> Result<()> {
     let secret_generator = Box::new(RandomHexGenerator::new(32));
     let rotation_service = new_rotation_service(api_client, aws_client, secret_generator);
 
+    let amqp_channel = amqp::connect(&config.rabbitmq).await?;
+    let publisher = Arc::new(new_rotation_event_publisher(amqp_channel.clone()));
+
     let state = Arc::new(AppState {
         config,
         rotation_service: Box::new(rotation_service),
+        publisher,
+        amqp_channel,
     });
 
     consumer::serve(state).await?;

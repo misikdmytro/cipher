@@ -5,13 +5,39 @@ use thiserror::Error;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     pub database: DatabaseConfig,
-    pub scheduler: HostingConfig,
-    pub api: HostingConfig,
     pub grpc: HostingConfig,
-    pub notificator: HostingConfig,
+    pub rabbitmq: RabbitMqConfig,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RabbitMqConfig {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+}
+
+impl Default for RabbitMqConfig {
+    fn default() -> Self {
+        Self {
+            host: "localhost".to_string(),
+            port: 5672,
+            username: "cipher".to_string(),
+            password: "cipher".to_string(),
+        }
+    }
+}
+
+impl RabbitMqConfig {
+    pub fn connection_string(&self) -> String {
+        format!(
+            "amqp://{}:{}@{}:{}/%2f",
+            self.username, self.password, self.host, self.port
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseConfig {
     pub username: String,
     pub password: String,
@@ -19,6 +45,19 @@ pub struct DatabaseConfig {
     pub port: u16,
     pub database: String,
     pub use_ssl: bool,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            username: "cipher".to_string(),
+            password: "cipher".to_string(),
+            host: "localhost".to_string(),
+            port: 5432,
+            database: "notificator".to_string(),
+            use_ssl: false,
+        }
+    }
 }
 
 impl DatabaseConfig {
@@ -38,23 +77,19 @@ pub struct HostingConfig {
     pub port: u16,
 }
 
-impl HostingConfig {
-    pub fn address(&self) -> String {
-        format!("{}://{}:{}", self.scheme, self.host, self.port)
-    }
-
-    pub fn address_without_scheme(&self) -> String {
-        format!("{}:{}", self.host, self.port)
+impl Default for HostingConfig {
+    fn default() -> Self {
+        Self {
+            scheme: "http".to_string(),
+            host: "[::1]".to_string(),
+            port: 50053,
+        }
     }
 }
 
-impl Default for HostingConfig {
-    fn default() -> Self {
-        HostingConfig {
-            scheme: "http".into(),
-            host: "127.0.0.1".into(),
-            port: 0,
-        }
+impl HostingConfig {
+    pub fn bind_address(&self) -> String {
+        format!("{}:{}", self.host, self.port)
     }
 }
 
@@ -71,7 +106,7 @@ impl From<ConfigError> for ConfigLoadError {
 impl AppConfig {
     pub fn load() -> Result<Self, ConfigLoadError> {
         Config::builder()
-            .add_source(File::with_name("api.config.toml"))
+            .add_source(File::with_name("notificator.config.toml"))
             .add_source(Environment::with_prefix("CIPHER").separator("_"))
             .build()
             .map_err(ConfigLoadError::from)?

@@ -7,10 +7,12 @@ use api::grpc::api_service::new_api_grpc_service;
 use api::handlers;
 use api::repositories::secrets::new_secrets_repository;
 use api::services::secrets::new_secrets_service;
+use api::services::webhooks::new_webhooks_service;
 use api::state::AppState;
-use mocks::MockSchedulerService;
+use mocks::{MockNotificatorService, MockSchedulerService};
 use proto::api::api_service_client::ApiServiceClient;
 use proto::api::api_service_server::ApiServiceServer;
+use proto::notificator::notificator_service_server::NotificatorServiceServer;
 use proto::scheduler::scheduler_service_server::SchedulerServiceServer;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -21,6 +23,7 @@ pub struct TestApp {
     pub http: reqwest::Client,
     pub db: sqlx::PgPool,
     pub scheduler: Arc<MockSchedulerService>,
+    pub notificator: Arc<MockNotificatorService>,
     pub api_grpc_client: ApiServiceClient<Channel>,
 }
 
@@ -35,6 +38,7 @@ impl TestApp {
 
     async fn build(scheduler_mock: MockSchedulerService) -> Self {
         let mock = Arc::new(scheduler_mock);
+        let notificator_mock = Arc::new(MockNotificatorService::success());
 
         // Start mock scheduler gRPC server
         let scheduler_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -49,6 +53,19 @@ impl TestApp {
                 .unwrap();
         });
 
+        // Start mock notificator gRPC server
+        let notificator_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let notificator_port = notificator_listener.local_addr().unwrap().port();
+
+        let notificator_clone = Arc::clone(&notificator_mock);
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(NotificatorServiceServer::from_arc(notificator_clone))
+                .serve_with_incoming(TcpListenerStream::new(notificator_listener))
+                .await
+                .unwrap();
+        });
+
         let config = AppConfig {
             database: test_db_config(),
             scheduler: HostingConfig {
@@ -57,6 +74,10 @@ impl TestApp {
             },
             api: Default::default(),
             grpc: Default::default(),
+            notificator: HostingConfig {
+                port: notificator_port,
+                ..Default::default()
+            },
         };
 
         let repository = new_secrets_repository(&config)
@@ -76,9 +97,21 @@ impl TestApp {
         ));
         let secrets_service = new_secrets_service(Box::new(repository), scheduler_client);
 
+        let notificator_endpoint = format!("http://127.0.0.1:{}", notificator_port);
+        let notificator_channel = tonic::transport::Endpoint::new(notificator_endpoint)
+            .unwrap()
+            .connect_lazy();
+        let notificator_client = Arc::new(tokio::sync::Mutex::new(
+            proto::notificator::notificator_service_client::NotificatorServiceClient::new(
+                notificator_channel,
+            ),
+        ));
+        let webhooks_service = new_webhooks_service(notificator_client);
+
         let state = Arc::new(AppState {
             config,
             secrets_service: Box::new(secrets_service),
+            webhooks_service: Box::new(webhooks_service),
         });
 
         // Start API gRPC server
@@ -115,6 +148,7 @@ impl TestApp {
             http: reqwest::Client::new(),
             db,
             scheduler: mock,
+            notificator: notificator_mock,
             api_grpc_client,
         }
     }

@@ -1,0 +1,18 @@
+[database]
+username = "cipher"
+password = "cipher"
+host = "localhost"
+port = 5432
+database = "notificator"
+use_ssl = false
+
+[grpc]
+scheme = "http"
+host = "[::1]"
+port = 50053
+
+[rabbitmq]
+host = "localhost"
+port = 5672
+username = "cipher"
+password = "cipher"

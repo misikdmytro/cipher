@@ -9,7 +9,9 @@ use api::grpc::api_service::new_api_grpc_service;
 use api::handlers;
 use api::repositories::secrets::new_secrets_repository;
 use api::services::secrets::new_secrets_service;
+use api::services::webhooks::new_webhooks_service;
 use api::state::AppState;
+use proto::notificator::notificator_service_client::NotificatorServiceClient;
 use proto::scheduler::scheduler_service_client::SchedulerServiceClient;
 use tokio::sync::Mutex;
 use tonic::transport::Endpoint;
@@ -20,15 +22,22 @@ async fn main() -> Result<()> {
 
     let config = AppConfig::load()?;
 
-    let channel = Endpoint::new(config.scheduler.address())?.connect_lazy();
-    let scheduler_client = Arc::new(Mutex::new(SchedulerServiceClient::new(channel)));
+    let scheduler_channel = Endpoint::new(config.scheduler.address())?.connect_lazy();
+    let scheduler_client = Arc::new(Mutex::new(SchedulerServiceClient::new(scheduler_channel)));
+
+    let notificator_channel = Endpoint::new(config.notificator.address())?.connect_lazy();
+    let notificator_client = Arc::new(Mutex::new(NotificatorServiceClient::new(
+        notificator_channel,
+    )));
 
     let repository = new_secrets_repository(&config).await?;
     let secrets_service = new_secrets_service(Box::new(repository), scheduler_client);
+    let webhooks_service = new_webhooks_service(notificator_client);
 
     let state = Arc::new(AppState {
         config: config.clone(),
         secrets_service: Box::new(secrets_service),
+        webhooks_service: Box::new(webhooks_service),
     });
 
     let http_address = state.config.api.address_without_scheme();

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package notificator;
+
+// Request message for registering a webhook for a secret
+message RegisterWebhookRequest {
+  // The ID of the secret to register the webhook for
+  string secret_id = 1;
+
+  // The URL to call when a rotation event occurs
+  string url = 2;
+}
+
+// Response message containing the registered webhook ID
+message RegisterWebhookResponse {
+  // The ID of the created webhook
+  string webhook_id = 1;
+}
+
+// Service for managing webhook notifications
+service NotificatorService {
+  // RegisterWebhook registers a new webhook URL for a given secret
+  rpc RegisterWebhook(RegisterWebhookRequest) returns (RegisterWebhookResponse);
+}

@@ -1,5 +1,6 @@
 mod common;
 mod secrets;
+mod webhooks;
 
 use std::sync::Arc;
 
@@ -28,7 +29,8 @@ use crate::state::AppState;
         (url = "http://localhost:3000", description = "Local development")
     ),
     tags(
-        (name = "secrets", description = "Create and manage secret rotation entries")
+        (name = "secrets", description = "Create and manage secret rotation entries"),
+        (name = "webhooks", description = "Register webhook notifications for rotation events")
     )
 )]
 struct ApiDoc;
@@ -36,6 +38,7 @@ struct ApiDoc;
 pub fn router(state: Arc<AppState>) -> Router {
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(secrets::save_secret))
+        .routes(routes!(webhooks::register_webhook))
         .with_state(state)
         .split_for_parts();
 

@@ -20,3 +20,8 @@ port = 3000
 scheme = "http"
 host = "[::1]"
 port = 50051
+
+[notificator]
+scheme = "http"
+host = "[::1]"
+port = 50053

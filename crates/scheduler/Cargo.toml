@@ -9,7 +9,7 @@ apalis = { workspace = true }
 apalis-postgres = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
-config = { workspace = true }
+common = { path = "../common" }
 cron = { workspace = true }
 interfaces = { path = "../interfaces" }
 lapin = { workspace = true }
@@ -19,6 +19,7 @@ serde_json = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

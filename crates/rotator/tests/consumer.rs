@@ -67,7 +67,7 @@ async fn publishes_started_and_done_on_success() {
 }
 
 #[tokio::test]
-async fn publishes_started_and_done_on_not_found() {
+async fn publishes_started_and_failed_on_not_found() {
     let secret_id = Uuid::new_v4();
     let rotation = MockRotationService::not_found();
     let publisher = MockRotationEventPublisher::success();
@@ -76,8 +76,12 @@ async fn publishes_started_and_done_on_not_found() {
 
     assert!(matches!(result, Err(ProcessError::NotFound)));
     assert_eq!(publisher.started_calls(), vec![secret_id]);
-    assert_eq!(publisher.done_calls(), vec![secret_id]);
-    assert!(publisher.failed_calls().is_empty());
+    assert!(publisher.done_calls().is_empty());
+
+    let failed = publisher.failed_calls();
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].0, secret_id);
+    assert_eq!(failed[0].1, "secret not found");
 }
 
 #[tokio::test]

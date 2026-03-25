@@ -15,6 +15,11 @@ port = 50052
 concurrency = 10
 poll_interval = 1000
 
+[health]
+scheme = "http"
+host = "0.0.0.0"
+port = 8082
+
 [rabbitmq]
 host = "localhost"
 port = 5672

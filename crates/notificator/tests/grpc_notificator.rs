@@ -25,6 +25,7 @@ impl TestApp {
             database: test_db_config(),
             grpc: HostingConfig::default(),
             rabbitmq: Default::default(),
+            health: HostingConfig::default(),
         };
 
         let repository = new_webhooks_repository(&config)

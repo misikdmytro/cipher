@@ -1,13 +1,12 @@
-use std::ops::Deref;
+use std::str::FromStr;
+use std::sync::Arc;
 use std::time::SystemTime;
-use std::{str::FromStr, sync::Arc};
 
 use apalis::prelude::*;
 use apalis_postgres::PostgresStorage;
 use chrono::Utc;
 use cron::Schedule as CronSchedule;
 use thiserror::Error;
-use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 use crate::jobs::rotate_secret::RotateSecretJob;
@@ -15,7 +14,7 @@ use crate::services::publisher::{PublishError, RotationPublisher};
 
 #[derive(Clone)]
 pub struct RotateSecretsState {
-    pub storage: Arc<Mutex<PostgresStorage<RotateSecretJob>>>,
+    pub storage: PostgresStorage<RotateSecretJob>,
     pub publisher: Arc<dyn RotationPublisher>,
 }
 
@@ -42,7 +41,7 @@ pub async fn handle_rotate_secret(
 
     state.publisher.publish(job.secret_id).await?;
 
-    match reschedule(job, state.deref()).await {
+    match reschedule(job, &state).await {
         Ok(_) => Ok(()),
         Err(e) => match e {
             RotateSecretError::NoFutureOccurrences => {
@@ -68,8 +67,7 @@ async fn reschedule(
     let run_at = SystemTime::from(next_run_at);
     let task = Task::builder(job).run_at_time(run_at).build();
 
-    let mut storage = state.storage.lock().await;
-    storage.push_task(task).await.map_err(|e| {
+    state.storage.clone().push_task(task).await.map_err(|e| {
         error!(error = ?e, "Failed to reschedule rotation job");
         RotateSecretError::StorageError
     })?;

@@ -1,15 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use common::consumer::{self, ConsumerConfig};
 use interfaces::events::rotation::RotationScheduled;
-use lapin::{
-    options::{
-        BasicAckOptions, BasicConsumeOptions, BasicNackOptions, QueueBindOptions,
-        QueueDeclareOptions,
-    },
-    types::FieldTable,
-};
 use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -18,45 +13,33 @@ use crate::services::rotation::RotationService;
 use crate::services::types::ServiceError;
 use crate::state::AppState;
 
-pub async fn serve(state: Arc<AppState>) -> Result<()> {
-    let channel = &state.amqp_channel;
+pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> Result<()> {
+    let config = ConsumerConfig {
+        queue_name: "rotator.rotation.scheduled".to_string(),
+        consumer_tag: "rotator".to_string(),
+        exchange: "rotation".to_string(),
+        routing_keys: vec!["rotation.scheduled".to_string()],
+        dead_letter_exchange: Some("rotation.dlx".to_string()),
+        dead_letter_routing_key: Some("rotator.rotation.scheduled".to_string()),
+    };
 
-    channel
-        .queue_declare(
-            "rotator.rotation.scheduled".into(),
-            QueueDeclareOptions {
-                durable: true,
-                ..Default::default()
-            },
-            FieldTable::default(),
-        )
-        .await?;
-
-    channel
-        .queue_bind(
-            "rotator.rotation.scheduled".into(),
-            "rotation".into(),
-            "rotation.scheduled".into(),
-            QueueBindOptions::default(),
-            FieldTable::default(),
-        )
-        .await?;
-
-    let mut consumer = channel
-        .basic_consume(
-            "rotator.rotation.scheduled".into(),
-            "rotator".into(),
-            BasicConsumeOptions::default(),
-            FieldTable::default(),
-        )
-        .await?;
+    let mut amqp_consumer = consumer::setup(&state.amqp_channel, &config).await?;
 
     info!("Rotator consumer started, waiting for messages");
 
-    while let Some(delivery) = consumer.next().await {
-        match delivery {
-            Ok(delivery) => handle_delivery(&state, &delivery).await,
-            Err(e) => error!(error = ?e, "Error receiving delivery"),
+    loop {
+        tokio::select! {
+            delivery = amqp_consumer.next() => {
+                match delivery {
+                    Some(Ok(delivery)) => handle_delivery(&state, &delivery).await,
+                    Some(Err(e)) => error!(error = ?e, "Error receiving delivery"),
+                    None => break,
+                }
+            }
+            _ = shutdown.cancelled() => {
+                info!("Shutdown signal received, stopping consumer");
+                break;
+            }
         }
     }
 
@@ -68,7 +51,7 @@ async fn handle_delivery(state: &AppState, delivery: &lapin::message::Delivery) 
         Ok(id) => id,
         Err(e) => {
             error!(error = ?e, "Invalid rotation message");
-            nack(delivery).await;
+            consumer::nack_reject(delivery).await;
             return;
         }
     };
@@ -77,7 +60,7 @@ async fn handle_delivery(state: &AppState, delivery: &lapin::message::Delivery) 
 
     if let Err(e) = state.publisher.publish_started(secret_id).await {
         error!(error = ?e, "Failed to publish rotation.started");
-        nack(delivery).await;
+        consumer::nack_requeue(delivery).await;
         return;
     }
 
@@ -86,14 +69,18 @@ async fn handle_delivery(state: &AppState, delivery: &lapin::message::Delivery) 
             if let Err(e) = state.publisher.publish_done(secret_id).await {
                 error!(error = ?e, "Failed to publish rotation.done");
             }
-            ack(delivery).await;
+            consumer::ack(delivery).await;
         }
         Err(ServiceError::NotFound) => {
             error!(secret_id = %secret_id, "Secret not found, discarding message");
-            if let Err(e) = state.publisher.publish_done(secret_id).await {
-                error!(error = ?e, "Failed to publish rotation.done");
+            if let Err(e) = state
+                .publisher
+                .publish_failed(secret_id, "secret not found".to_string())
+                .await
+            {
+                error!(error = ?e, "Failed to publish rotation.failed");
             }
-            ack(delivery).await;
+            consumer::ack(delivery).await;
         }
         Err(e) => {
             error!(error = ?e, "Rotation failed");
@@ -104,7 +91,7 @@ async fn handle_delivery(state: &AppState, delivery: &lapin::message::Delivery) 
             {
                 error!(error = ?e_pub, "Failed to publish rotation.failed");
             }
-            nack(delivery).await;
+            consumer::nack_requeue(delivery).await;
         }
     }
 }
@@ -127,8 +114,11 @@ pub async fn process_rotation(
             Ok(())
         }
         Err(ServiceError::NotFound) => {
-            if let Err(e) = publisher.publish_done(secret_id).await {
-                error!(error = ?e, "Failed to publish rotation.done");
+            if let Err(e) = publisher
+                .publish_failed(secret_id, "secret not found".to_string())
+                .await
+            {
+                error!(error = ?e, "Failed to publish rotation.failed");
             }
             Err(ProcessError::NotFound)
         }
@@ -144,7 +134,7 @@ pub async fn process_rotation(
 #[derive(Debug, thiserror::Error)]
 pub enum ProcessError {
     #[error("publish error: {0}")]
-    Publish(#[source] crate::services::publisher::PublishError),
+    Publish(#[source] common::amqp::PublishError),
 
     #[error("secret not found")]
     NotFound,
@@ -156,16 +146,4 @@ pub enum ProcessError {
 fn parse_message(delivery: &lapin::message::Delivery) -> Result<Uuid> {
     let event: RotationScheduled = serde_json::from_slice(&delivery.data)?;
     Ok(event.secret_id)
-}
-
-async fn ack(delivery: &lapin::message::Delivery) {
-    if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-        error!(error = ?e, "Failed to ack delivery");
-    }
-}
-
-async fn nack(delivery: &lapin::message::Delivery) {
-    if let Err(e) = delivery.nack(BasicNackOptions::default()).await {
-        error!(error = ?e, "Failed to nack delivery");
-    }
 }

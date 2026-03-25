@@ -1,12 +1,11 @@
+use std::str::FromStr;
 use std::time::SystemTime;
-use std::{str::FromStr, sync::Arc};
 
 use apalis::prelude::*;
 use apalis_postgres::PostgresStorage;
 use chrono::Utc;
 use cron::Schedule as CronSchedule;
 use proto::scheduler::{ScheduleSecretRotationRequest, scheduler_service_server::SchedulerService};
-use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 use tracing::error;
 use uuid::Uuid;
@@ -14,11 +13,11 @@ use uuid::Uuid;
 use crate::jobs::rotate_secret::RotateSecretJob;
 
 pub struct SchedulerServer {
-    storage: Arc<Mutex<PostgresStorage<RotateSecretJob>>>,
+    storage: PostgresStorage<RotateSecretJob>,
 }
 
 pub fn new_scheduler_service(
-    storage: Arc<Mutex<PostgresStorage<RotateSecretJob>>>,
+    storage: PostgresStorage<RotateSecretJob>,
 ) -> impl SchedulerService + 'static {
     SchedulerServer { storage }
 }
@@ -52,8 +51,7 @@ impl SchedulerService for SchedulerServer {
             .run_at_time(SystemTime::from(next_run_at))
             .build();
 
-        let mut storage = self.storage.lock().await;
-        storage.push_task(task).await.map_err(|e| {
+        self.storage.clone().push_task(task).await.map_err(|e| {
             error!(error = ?e, "Failed to persist rotation schedule");
             Status::internal("internal error")
         })?;

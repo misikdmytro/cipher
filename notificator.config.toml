@@ -11,6 +11,11 @@ scheme = "http"
 host = "[::1]"
 port = 50053
 
+[health]
+scheme = "http"
+host = "0.0.0.0"
+port = 8084
+
 [rabbitmq]
 host = "localhost"
 port = 5672

@@ -14,6 +14,18 @@ pub enum DeliveryError {
     StatusError(reqwest::StatusCode),
 }
 
+impl DeliveryError {
+    /// Returns true for errors that may succeed on retry.
+    pub fn is_retriable(&self) -> bool {
+        match self {
+            DeliveryError::HttpError(e) => e.is_timeout() || e.is_connect() || e.is_request(),
+            DeliveryError::StatusError(status) => {
+                status.is_server_error() || *status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            }
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait WebhookDeliveryService: Send + Sync {
     async fn deliver(&self, url: &str, payload: &WebhookPayload) -> Result<(), DeliveryError>;
@@ -55,15 +67,23 @@ impl WebhookDeliveryService for HttpWebhookDeliveryService {
 
             match self.try_deliver(url, payload).await {
                 Ok(()) => return Ok(()),
-                Err(e) => {
+                Err(e) if e.is_retriable() => {
                     error!(
                         attempt = attempt + 1,
                         max_attempts,
                         url,
                         error = ?e,
-                        "Webhook delivery attempt failed"
+                        "Retriable webhook delivery attempt failed"
                     );
                     last_error = Some(e);
+                }
+                Err(e) => {
+                    error!(
+                        url,
+                        error = ?e,
+                        "Non-retriable webhook delivery error, not retrying"
+                    );
+                    return Err(e);
                 }
             }
         }

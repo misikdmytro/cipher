@@ -1,6 +1,6 @@
+use common::db::DbConnectionError;
 use interfaces::secrets::Secret;
 use sqlx::PgPool;
-use thiserror::Error;
 
 use crate::{config::AppConfig, repositories::models::secrets::Secret as SecretModel};
 
@@ -15,51 +15,9 @@ pub struct DeleteSecretRequest {
     pub id: uuid::Uuid,
 }
 
-#[derive(Debug, Error)]
-#[error("failed to connect to database: {0}")]
-pub struct DbConnectionError(anyhow::Error);
-
-#[derive(Debug, Error)]
-pub enum AddSecretError {
-    #[error("infrastructure error: {0}")]
-    Infrastructure(anyhow::Error),
-}
-
-impl From<sqlx::Error> for AddSecretError {
-    fn from(e: sqlx::Error) -> Self {
-        AddSecretError::Infrastructure(e.into())
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum DeleteSecretError {
-    #[error("secret not found")]
-    NotFound,
-
-    #[error("infrastructure error: {0}")]
-    Infrastructure(anyhow::Error),
-}
-
-impl From<sqlx::Error> for DeleteSecretError {
-    fn from(e: sqlx::Error) -> Self {
-        DeleteSecretError::Infrastructure(e.into())
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum GetSecretError {
-    #[error("secret not found")]
-    NotFound,
-
-    #[error("infrastructure error: {0}")]
-    Infrastructure(anyhow::Error),
-}
-
-impl From<sqlx::Error> for GetSecretError {
-    fn from(e: sqlx::Error) -> Self {
-        GetSecretError::Infrastructure(e.into())
-    }
-}
+common::repo_error!(AddSecretError);
+common::repo_error!(DeleteSecretError, NotFound);
+common::repo_error!(GetSecretError, NotFound);
 
 #[async_trait::async_trait]
 pub trait SecretsRepository: Send + Sync {

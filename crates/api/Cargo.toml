@@ -8,7 +8,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
-config = { workspace = true }
+common = { path = "../common" }
 cron = { workspace = true }
 interfaces = { path = "../interfaces" }
 proto = { path = "../proto" }
@@ -17,6 +17,7 @@ sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

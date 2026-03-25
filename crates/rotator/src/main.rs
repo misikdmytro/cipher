@@ -3,7 +3,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use aws_config::BehaviorVersion;
 use proto::api::api_service_client::ApiServiceClient;
-use rotator::amqp;
 use rotator::config::AppConfig;
 use rotator::consumer;
 use rotator::helpers::aws::new_aws_secrets_client;
@@ -18,6 +17,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let config = AppConfig::load()?;
+    let shutdown = common::shutdown::cancellation_token();
 
     let channel = Endpoint::new(config.api.address())?.connect_lazy();
     let api_client = ApiServiceClient::new(channel);
@@ -30,17 +30,24 @@ async fn main() -> Result<()> {
     let secret_generator = Box::new(RandomHexGenerator::new(32));
     let rotation_service = new_rotation_service(api_client, aws_client, secret_generator);
 
-    let amqp_channel = amqp::connect(&config.rabbitmq).await?;
-    let publisher = Arc::new(new_rotation_event_publisher(amqp_channel.clone()));
+    let amqp = common::amqp::connect(&config.rabbitmq).await?;
+    let publish_channel = amqp.create_publish_channel().await?;
+    let consume_channel = amqp.create_consume_channel().await?;
+
+    let publisher = Arc::new(new_rotation_event_publisher(publish_channel));
 
     let state = Arc::new(AppState {
-        config,
         rotation_service: Box::new(rotation_service),
         publisher,
-        amqp_channel,
+        amqp_channel: consume_channel,
     });
 
-    consumer::serve(state).await?;
+    let health_address = config.health.bind_address();
+
+    tokio::select! {
+        result = consumer::serve(state, shutdown.clone()) => result?,
+        result = common::health::serve_health(&health_address, shutdown.clone()) => result?,
+    }
 
     Ok(())
 }

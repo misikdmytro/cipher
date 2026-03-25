@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
 use interfaces::secrets::Secret;
 use proto::scheduler::{
     ScheduleSecretRotationRequest, scheduler_service_client::SchedulerServiceClient,
 };
-use tokio::sync::Mutex;
 use tonic::transport::Channel;
 use tracing::error;
 use uuid::Uuid;
@@ -24,12 +21,12 @@ pub trait SecretsService: Send + Sync {
 
 struct SecretsServiceImpl {
     repository: Box<dyn SecretsRepository>,
-    scheduler: Arc<Mutex<SchedulerServiceClient<Channel>>>,
+    scheduler: SchedulerServiceClient<Channel>,
 }
 
 pub fn new_secrets_service(
     repository: Box<dyn SecretsRepository>,
-    scheduler: Arc<Mutex<SchedulerServiceClient<Channel>>>,
+    scheduler: SchedulerServiceClient<Channel>,
 ) -> impl SecretsService + 'static {
     SecretsServiceImpl {
         repository,
@@ -63,7 +60,7 @@ impl SecretsService for SecretsServiceImpl {
         })?;
 
         let result = {
-            let mut scheduler = self.scheduler.lock().await;
+            let mut scheduler = self.scheduler.clone();
             scheduler
                 .schedule_secret_rotation(ScheduleSecretRotationRequest {
                     secret_id: secret.id.to_string(),

@@ -1,9 +1,6 @@
-use std::sync::Arc;
-
 use proto::notificator::{
     RegisterWebhookRequest, notificator_service_client::NotificatorServiceClient,
 };
-use tokio::sync::Mutex;
 use tonic::transport::Channel;
 use tracing::error;
 use uuid::Uuid;
@@ -16,11 +13,11 @@ pub trait WebhooksService: Send + Sync {
 }
 
 struct WebhooksServiceImpl {
-    notificator: Arc<Mutex<NotificatorServiceClient<Channel>>>,
+    notificator: NotificatorServiceClient<Channel>,
 }
 
 pub fn new_webhooks_service(
-    notificator: Arc<Mutex<NotificatorServiceClient<Channel>>>,
+    notificator: NotificatorServiceClient<Channel>,
 ) -> impl WebhooksService + 'static {
     WebhooksServiceImpl { notificator }
 }
@@ -29,7 +26,7 @@ pub fn new_webhooks_service(
 impl WebhooksService for WebhooksServiceImpl {
     async fn register_webhook(&self, secret_id: Uuid, url: String) -> ServiceResult<Uuid> {
         let result = {
-            let mut client = self.notificator.lock().await;
+            let mut client = self.notificator.clone();
             client
                 .register_webhook(RegisterWebhookRequest {
                     secret_id: secret_id.to_string(),

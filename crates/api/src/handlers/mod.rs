@@ -42,5 +42,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
         .split_for_parts();
 
-    router.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api))
+    router
+        .merge(::common::health::health_router())
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api))
 }

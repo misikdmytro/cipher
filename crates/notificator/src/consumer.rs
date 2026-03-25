@@ -1,15 +1,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use common::consumer::{self, ConsumerConfig};
+use futures::future::join_all;
 use interfaces::events::rotation::{RotationDone, RotationFailed, RotationStarted};
-use lapin::{
-    options::{
-        BasicAckOptions, BasicConsumeOptions, BasicNackOptions, QueueBindOptions,
-        QueueDeclareOptions,
-    },
-    types::FieldTable,
-};
 use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use crate::repositories::webhooks::WebhooksRepository;
@@ -17,47 +13,37 @@ use crate::services::types::WebhookPayload;
 use crate::services::webhook_delivery::WebhookDeliveryService;
 use crate::state::AppState;
 
-pub async fn serve(state: Arc<AppState>) -> Result<()> {
-    let channel = &state.amqp_channel;
+pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> Result<()> {
+    let config = ConsumerConfig {
+        queue_name: "notificator.rotation.events".to_string(),
+        consumer_tag: "notificator".to_string(),
+        exchange: "rotation".to_string(),
+        routing_keys: vec![
+            "rotation.started".to_string(),
+            "rotation.done".to_string(),
+            "rotation.failed".to_string(),
+        ],
+        dead_letter_exchange: Some("rotation.dlx".to_string()),
+        dead_letter_routing_key: Some("notificator.rotation.events".to_string()),
+    };
 
-    channel
-        .queue_declare(
-            "notificator.rotation.events".into(),
-            QueueDeclareOptions {
-                durable: true,
-                ..Default::default()
-            },
-            FieldTable::default(),
-        )
-        .await?;
-
-    for routing_key in &["rotation.started", "rotation.done", "rotation.failed"] {
-        channel
-            .queue_bind(
-                "notificator.rotation.events".into(),
-                "rotation".into(),
-                (*routing_key).into(),
-                QueueBindOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
-    }
-
-    let mut consumer = channel
-        .basic_consume(
-            "notificator.rotation.events".into(),
-            "notificator".into(),
-            BasicConsumeOptions::default(),
-            FieldTable::default(),
-        )
-        .await?;
+    let mut amqp_consumer = consumer::setup(&state.amqp_channel, &config).await?;
 
     info!("Notificator consumer started, waiting for messages");
 
-    while let Some(delivery) = consumer.next().await {
-        match delivery {
-            Ok(delivery) => handle_delivery(&state, &delivery).await,
-            Err(e) => error!(error = ?e, "Error receiving delivery"),
+    loop {
+        tokio::select! {
+            delivery = amqp_consumer.next() => {
+                match delivery {
+                    Some(Ok(delivery)) => handle_delivery(&state, &delivery).await,
+                    Some(Err(e)) => error!(error = ?e, "Error receiving delivery"),
+                    None => break,
+                }
+            }
+            _ = shutdown.cancelled() => {
+                info!("Shutdown signal received, stopping consumer");
+                break;
+            }
         }
     }
 
@@ -71,7 +57,7 @@ async fn handle_delivery(state: &AppState, delivery: &lapin::message::Delivery) 
         Ok(event) => event,
         Err(e) => {
             error!(error = ?e, routing_key, "Invalid event message");
-            nack(delivery).await;
+            consumer::nack_reject(delivery).await;
             return;
         }
     };
@@ -92,7 +78,7 @@ async fn handle_delivery(state: &AppState, delivery: &lapin::message::Delivery) 
         error!(error = ?e, "Failed to process rotation event");
     }
 
-    ack(delivery).await;
+    consumer::ack(delivery).await;
 }
 
 pub async fn process_event(
@@ -110,7 +96,7 @@ pub async fn process_event(
         return Ok(());
     }
 
-    for webhook in &webhooks {
+    let futures = webhooks.iter().map(|webhook| async {
         if let Err(e) = delivery_service.deliver(&webhook.url, payload).await {
             error!(
                 webhook_id = %webhook.id,
@@ -119,7 +105,9 @@ pub async fn process_event(
                 "Webhook delivery failed after retries"
             );
         }
-    }
+    });
+
+    join_all(futures).await;
 
     Ok(())
 }
@@ -157,17 +145,5 @@ fn parse_event(routing_key: &str, data: &[u8]) -> Result<WebhookPayload> {
             })
         }
         _ => anyhow::bail!("unknown routing key: {}", routing_key),
-    }
-}
-
-async fn ack(delivery: &lapin::message::Delivery) {
-    if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-        error!(error = ?e, "Failed to ack delivery");
-    }
-}
-
-async fn nack(delivery: &lapin::message::Delivery) {
-    if let Err(e) = delivery.nack(BasicNackOptions::default()).await {
-        error!(error = ?e, "Failed to nack delivery");
     }
 }

@@ -35,8 +35,12 @@ async fn delivers_to_all_matching_webhooks() {
     assert!(result.is_ok());
     let calls = delivery.deliver_calls();
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].0, "https://example.com/hook1");
-    assert_eq!(calls[1].0, "https://example.com/hook2");
+    let mut urls: Vec<&str> = calls.iter().map(|(u, _)| u.as_str()).collect();
+    urls.sort();
+    assert_eq!(
+        urls,
+        vec!["https://example.com/hook1", "https://example.com/hook2"]
+    );
 }
 
 #[tokio::test]

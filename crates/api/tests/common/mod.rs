@@ -92,20 +92,18 @@ impl TestApp {
         let channel = tonic::transport::Endpoint::new(scheduler_endpoint)
             .unwrap()
             .connect_lazy();
-        let scheduler_client = Arc::new(tokio::sync::Mutex::new(
-            proto::scheduler::scheduler_service_client::SchedulerServiceClient::new(channel),
-        ));
+        let scheduler_client =
+            proto::scheduler::scheduler_service_client::SchedulerServiceClient::new(channel);
         let secrets_service = new_secrets_service(Box::new(repository), scheduler_client);
 
         let notificator_endpoint = format!("http://127.0.0.1:{}", notificator_port);
         let notificator_channel = tonic::transport::Endpoint::new(notificator_endpoint)
             .unwrap()
             .connect_lazy();
-        let notificator_client = Arc::new(tokio::sync::Mutex::new(
+        let notificator_client =
             proto::notificator::notificator_service_client::NotificatorServiceClient::new(
                 notificator_channel,
-            ),
-        ));
+            );
         let webhooks_service = new_webhooks_service(notificator_client);
 
         let state = Arc::new(AppState {

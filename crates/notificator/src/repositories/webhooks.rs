@@ -1,5 +1,5 @@
+use common::db::DbConnectionError;
 use sqlx::PgPool;
-use thiserror::Error;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
@@ -11,33 +11,8 @@ pub struct AddWebhookRequest {
     pub url: String,
 }
 
-#[derive(Debug, Error)]
-#[error("failed to connect to database: {0}")]
-pub struct DbConnectionError(anyhow::Error);
-
-#[derive(Debug, Error)]
-pub enum AddWebhookError {
-    #[error("infrastructure error: {0}")]
-    Infrastructure(anyhow::Error),
-}
-
-impl From<sqlx::Error> for AddWebhookError {
-    fn from(e: sqlx::Error) -> Self {
-        AddWebhookError::Infrastructure(e.into())
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum GetWebhooksError {
-    #[error("infrastructure error: {0}")]
-    Infrastructure(anyhow::Error),
-}
-
-impl From<sqlx::Error> for GetWebhooksError {
-    fn from(e: sqlx::Error) -> Self {
-        GetWebhooksError::Infrastructure(e.into())
-    }
-}
+common::repo_error!(AddWebhookError);
+common::repo_error!(GetWebhooksError);
 
 #[async_trait::async_trait]
 pub trait WebhooksRepository: Send + Sync {

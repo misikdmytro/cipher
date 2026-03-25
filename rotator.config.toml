@@ -8,3 +8,8 @@ password = "cipher"
 scheme = "http"
 host = "[::1]"
 port = 50051
+
+[health]
+scheme = "http"
+host = "0.0.0.0"
+port = 8083

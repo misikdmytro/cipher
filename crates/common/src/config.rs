@@ -2,6 +2,7 @@ use config::{Config, ConfigError, Environment, File};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::level_filters::LevelFilter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RabbitMqConfig {
@@ -88,6 +89,42 @@ impl HostingConfig {
 
     pub fn bind_address(&self) -> String {
         format!("{}:{}", self.host, self.port)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogConfig {
+    #[serde(with = "level_filter_serde")]
+    pub min_level: LevelFilter,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            min_level: LevelFilter::DEBUG,
+        }
+    }
+}
+
+mod level_filter_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use tracing::level_filters::LevelFilter;
+
+    pub fn serialize<S: Serializer>(level: &LevelFilter, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&level.to_string())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<LevelFilter, D::Error> {
+        let s = String::deserialize(d)?;
+        s.parse::<LevelFilter>().map_err(serde::de::Error::custom)
+    }
+}
+
+impl LogConfig {
+    pub fn init_tracing(&self) {
+        tracing_subscriber::fmt()
+            .with_max_level(self.min_level)
+            .init();
     }
 }
 

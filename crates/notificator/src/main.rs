@@ -11,9 +11,8 @@ use notificator::state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
-
     let config = AppConfig::load()?;
+    config.log.init_tracing();
     let shutdown = common::shutdown::cancellation_token();
 
     let repository = new_webhooks_repository(&config).await?;

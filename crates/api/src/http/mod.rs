@@ -1,3 +1,5 @@
+pub mod trace_id;
+
 use anyhow::Result;
 use axum::Router;
 use tokio::net::TcpListener;

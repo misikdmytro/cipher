@@ -17,9 +17,8 @@ use scheduler::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
-
     let config = AppConfig::load()?;
+    config.log.init_tracing();
     let shutdown = common::shutdown::cancellation_token();
 
     let pool = PgPoolOptions::new()

@@ -1,3 +1,6 @@
+[log]
+min_level = "DEBUG"
+
 [database]
 username = "cipher"
 password = "cipher"

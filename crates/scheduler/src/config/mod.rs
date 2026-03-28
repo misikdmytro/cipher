@@ -1,8 +1,11 @@
-pub use common::config::{ConfigLoadError, DatabaseConfig, HostingConfig, RabbitMqConfig};
+pub use common::config::{
+    ConfigLoadError, DatabaseConfig, HostingConfig, LogConfig, RabbitMqConfig,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
+    pub log: LogConfig,
     pub database: DatabaseConfig,
     pub grpc: HostingConfig,
     pub worker: WorkerConfig,

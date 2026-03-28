@@ -4,7 +4,7 @@ mod webhooks;
 
 use std::sync::Arc;
 
-use axum::Router;
+use axum::{Router, middleware::from_fn};
 use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
@@ -44,5 +44,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 
     router
         .merge(::common::health::health_router())
+        .layer(from_fn(crate::middleware::mw_log_traffic))
+        .layer(from_fn(crate::middleware::mw_trace_id))
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api))
 }

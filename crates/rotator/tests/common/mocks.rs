@@ -1,10 +1,13 @@
 use std::sync::{Arc, Mutex};
 
-use rotator::helpers::aws::{AwsSecretError, AwsSecretsClient};
+use rotator::helpers::aws::{AwsSecretError, AwsSecretsClient, AwsSecretsClientFactory};
 use rotator::helpers::generator::SecretGenerator;
 use rotator::services::publisher::{PublishError, RotationEventPublisher};
 
-use proto::api::{GetSecretRequest, GetSecretResponse, api_service_server::ApiService};
+use proto::api::{
+    AwsConfig, GetSecretRequest, GetSecretResponse, api_service_server::ApiService,
+    get_secret_response::Provider,
+};
 use uuid::Uuid;
 
 pub struct MockApiService {
@@ -24,6 +27,17 @@ impl MockApiService {
         Self::new(vec![Ok(GetSecretResponse {
             secret_id: secret_id.to_string(),
             path: path.to_string(),
+            provider: None,
+        })])
+    }
+
+    pub fn ok_with_aws(secret_id: &str, path: &str, role_arn: &str) -> Self {
+        Self::new(vec![Ok(GetSecretResponse {
+            secret_id: secret_id.to_string(),
+            path: path.to_string(),
+            provider: Some(Provider::Aws(AwsConfig {
+                role_arn: role_arn.to_string(),
+            })),
         })])
     }
 
@@ -239,5 +253,78 @@ impl RotationEventPublisher for MockRotationEventPublisher {
             .unwrap()
             .push((secret_id, error));
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct MockAwsSecretsClientFactory {
+    client: MockAwsSecretsClient,
+}
+
+impl MockAwsSecretsClientFactory {
+    pub fn new(client: MockAwsSecretsClient) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait::async_trait]
+impl AwsSecretsClientFactory for MockAwsSecretsClientFactory {
+    async fn create(
+        &self,
+        _role_arn: Option<&str>,
+    ) -> Result<Box<dyn AwsSecretsClient>, AwsSecretError> {
+        Ok(Box::new(self.client.clone()))
+    }
+}
+
+pub struct FailingAwsSecretsClientFactory;
+
+#[async_trait::async_trait]
+impl AwsSecretsClientFactory for FailingAwsSecretsClientFactory {
+    async fn create(
+        &self,
+        _role_arn: Option<&str>,
+    ) -> Result<Box<dyn AwsSecretsClient>, AwsSecretError> {
+        Err(AwsSecretError::Other("STS AssumeRole failed".into()))
+    }
+}
+
+#[derive(Clone)]
+pub struct RecordingAwsSecretsClientFactory {
+    inner: Arc<RecordingAwsSecretsClientFactoryInner>,
+}
+
+struct RecordingAwsSecretsClientFactoryInner {
+    client: MockAwsSecretsClient,
+    received_role_arns: Mutex<Vec<Option<String>>>,
+}
+
+impl RecordingAwsSecretsClientFactory {
+    pub fn new(client: MockAwsSecretsClient) -> Self {
+        Self {
+            inner: Arc::new(RecordingAwsSecretsClientFactoryInner {
+                client,
+                received_role_arns: Mutex::new(Vec::new()),
+            }),
+        }
+    }
+
+    pub fn received_role_arns(&self) -> Vec<Option<String>> {
+        self.inner.received_role_arns.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl AwsSecretsClientFactory for RecordingAwsSecretsClientFactory {
+    async fn create(
+        &self,
+        role_arn: Option<&str>,
+    ) -> Result<Box<dyn AwsSecretsClient>, AwsSecretError> {
+        self.inner
+            .received_role_arns
+            .lock()
+            .unwrap()
+            .push(role_arn.map(|s| s.to_string()));
+        Ok(Box::new(self.inner.client.clone()))
     }
 }

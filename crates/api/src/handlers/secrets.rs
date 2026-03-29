@@ -18,6 +18,15 @@ fn validate_cron(expr: &str) -> Result<(), ValidationError> {
     })
 }
 
+/// AWS-specific configuration for cross-account role assumption.
+#[derive(Deserialize, ToSchema, Validate)]
+pub(in crate::handlers) struct AwsConfigRequest {
+    /// The ARN of the IAM role to assume before rotating the secret.
+    #[schema(example = "arn:aws:iam::123456789012:role/SecretRotator")]
+    #[validate(length(min = 20, max = 2048))]
+    pub role_arn: String,
+}
+
 /// Request payload for creating a new secret entry.
 #[derive(Deserialize, ToSchema, Validate)]
 pub(in crate::handlers) struct SaveSecretRequest {
@@ -30,6 +39,10 @@ pub(in crate::handlers) struct SaveSecretRequest {
     #[schema(example = "0 0 * * * * *")]
     #[validate(length(min = 1, max = 255), custom(function = "validate_cron"))]
     pub cron_expression: String,
+
+    /// Optional AWS-specific configuration for cross-account role assumption.
+    #[validate(nested)]
+    pub aws: Option<AwsConfigRequest>,
 }
 
 /// Response returned after successful secret creation.
@@ -68,7 +81,11 @@ pub(in crate::handlers) async fn save_secret(
 
     match state
         .secrets_service
-        .create_secret(body.path, body.cron_expression)
+        .create_secret(
+            body.path,
+            body.cron_expression,
+            body.aws.map(|a| a.role_arn),
+        )
         .await
     {
         Ok(id) => (StatusCode::CREATED, Json(SaveSecretResponse { id })).into_response(),

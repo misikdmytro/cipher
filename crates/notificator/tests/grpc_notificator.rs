@@ -22,6 +22,7 @@ struct TestApp {
 impl TestApp {
     async fn spawn() -> Self {
         let config = AppConfig {
+            log: Default::default(),
             database: test_db_config(),
             grpc: HostingConfig::default(),
             rabbitmq: Default::default(),

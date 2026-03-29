@@ -5,7 +5,7 @@ use aws_config::BehaviorVersion;
 use proto::api::api_service_client::ApiServiceClient;
 use rotator::config::AppConfig;
 use rotator::consumer;
-use rotator::helpers::aws::new_aws_secrets_client;
+use rotator::helpers::aws::DefaultAwsSecretsClientFactory;
 use rotator::helpers::generator::RandomHexGenerator;
 use rotator::services::publisher::new_rotation_event_publisher;
 use rotator::services::rotation::new_rotation_service;
@@ -22,12 +22,10 @@ async fn main() -> Result<()> {
     let api_client = ApiServiceClient::new(channel);
 
     let aws_cfg = aws_config::load_defaults(BehaviorVersion::latest()).await;
-    let aws_client = Box::new(new_aws_secrets_client(aws_sdk_secretsmanager::Client::new(
-        &aws_cfg,
-    )));
+    let aws_factory = Box::new(DefaultAwsSecretsClientFactory::new(aws_cfg));
 
     let secret_generator = Box::new(RandomHexGenerator::new(32));
-    let rotation_service = new_rotation_service(api_client, aws_client, secret_generator);
+    let rotation_service = new_rotation_service(api_client, aws_factory, secret_generator);
 
     let amqp = common::amqp::connect(&config.rabbitmq).await?;
     let publish_channel = amqp.create_publish_channel().await?;

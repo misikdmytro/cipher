@@ -2,7 +2,10 @@ mod common;
 
 use std::sync::Arc;
 
-use common::mocks::{MockApiService, MockAwsSecretsClient, MockSecretGenerator};
+use common::mocks::{
+    FailingAwsSecretsClientFactory, MockApiService, MockAwsSecretsClient,
+    MockAwsSecretsClientFactory, MockSecretGenerator, RecordingAwsSecretsClientFactory,
+};
 use proto::api::{api_service_client::ApiServiceClient, api_service_server::ApiServiceServer};
 use rotator::services::rotation::{RotationService, new_rotation_service};
 use tokio::net::TcpListener;
@@ -42,9 +45,10 @@ async fn rotate_puts_generated_secret_to_aws_path() {
 
     let aws = MockAwsSecretsClient::success();
     let aws_handle = aws.clone();
+    let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("generated-secret-value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(aws), generator);
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
     svc.rotate(secret_id)
         .await
         .expect("rotation should succeed");
@@ -62,9 +66,10 @@ async fn rotate_sends_correct_secret_id_to_api() {
     let endpoint = start_mock_api(mock_api.clone()).await;
 
     let aws = MockAwsSecretsClient::success();
+    let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(aws), generator);
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
     svc.rotate(secret_id).await.unwrap();
 
     let requests = mock_api.received_requests();
@@ -79,9 +84,10 @@ async fn rotate_returns_not_found_when_api_returns_not_found() {
 
     let aws = MockAwsSecretsClient::success();
     let aws_handle = aws.clone();
+    let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(aws), generator);
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
     let result = svc.rotate(Uuid::new_v4()).await;
 
     assert!(matches!(
@@ -97,9 +103,10 @@ async fn rotate_returns_api_error_on_grpc_failure() {
     let endpoint = start_mock_api(mock_api).await;
 
     let aws = MockAwsSecretsClient::success();
+    let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(aws), generator);
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
     let result = svc.rotate(Uuid::new_v4()).await;
 
     assert!(matches!(
@@ -119,9 +126,10 @@ async fn rotate_creates_secret_when_put_returns_not_found() {
 
     let aws = MockAwsSecretsClient::put_not_found_then_create_ok();
     let aws_handle = aws.clone();
+    let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("new-value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(aws), generator);
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
     svc.rotate(secret_id)
         .await
         .expect("rotation should succeed with create fallback");
@@ -139,9 +147,10 @@ async fn rotate_returns_aws_error_when_create_fallback_fails() {
     let endpoint = start_mock_api(mock_api).await;
 
     let aws = MockAwsSecretsClient::put_not_found_then_create_fails();
+    let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(aws), generator);
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
     let result = svc.rotate(secret_id).await;
 
     assert!(matches!(
@@ -157,9 +166,75 @@ async fn rotate_returns_aws_error_when_put_fails() {
     let endpoint = start_mock_api(mock_api).await;
 
     let aws = MockAwsSecretsClient::put_fails();
+    let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(aws), generator);
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
+    let result = svc.rotate(secret_id).await;
+
+    assert!(matches!(
+        result,
+        Err(rotator::services::types::ServiceError::AwsError(_))
+    ));
+}
+
+#[tokio::test]
+async fn rotate_with_role_arn_passes_arn_to_factory() {
+    let secret_id = Uuid::new_v4();
+    let mock_api = Arc::new(MockApiService::ok_with_aws(
+        &secret_id.to_string(),
+        "cross-account/secret",
+        "arn:aws:iam::123456789012:role/Rotator",
+    ));
+    let endpoint = start_mock_api(mock_api).await;
+
+    let aws = MockAwsSecretsClient::success();
+    let recording = RecordingAwsSecretsClientFactory::new(aws);
+    let recording_handle = recording.clone();
+    let generator = Box::new(MockSecretGenerator::new("value"));
+
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(recording), generator);
+    svc.rotate(secret_id).await.unwrap();
+
+    let arns = recording_handle.received_role_arns();
+    assert_eq!(
+        arns,
+        vec![Some("arn:aws:iam::123456789012:role/Rotator".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn rotate_without_role_arn_passes_none_to_factory() {
+    let secret_id = Uuid::new_v4();
+    let mock_api = Arc::new(MockApiService::ok(&secret_id.to_string(), "some/path"));
+    let endpoint = start_mock_api(mock_api).await;
+
+    let aws = MockAwsSecretsClient::success();
+    let recording = RecordingAwsSecretsClientFactory::new(aws);
+    let recording_handle = recording.clone();
+    let generator = Box::new(MockSecretGenerator::new("value"));
+
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(recording), generator);
+    svc.rotate(secret_id).await.unwrap();
+
+    let arns = recording_handle.received_role_arns();
+    assert_eq!(arns, vec![None]);
+}
+
+#[tokio::test]
+async fn rotate_returns_aws_error_when_role_assumption_fails() {
+    let secret_id = Uuid::new_v4();
+    let mock_api = Arc::new(MockApiService::ok_with_aws(
+        &secret_id.to_string(),
+        "some/path",
+        "arn:aws:iam::999999999999:role/BadRole",
+    ));
+    let endpoint = start_mock_api(mock_api).await;
+
+    let factory = FailingAwsSecretsClientFactory;
+    let generator = Box::new(MockSecretGenerator::new("value"));
+
+    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
     let result = svc.rotate(secret_id).await;
 
     assert!(matches!(

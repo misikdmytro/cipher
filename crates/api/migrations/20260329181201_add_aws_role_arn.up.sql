@@ -1,0 +1,1 @@
+ALTER TABLE secrets ADD COLUMN aws_role_arn VARCHAR(2048);

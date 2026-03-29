@@ -67,6 +67,7 @@ impl TestApp {
         });
 
         let config = AppConfig {
+            log: Default::default(),
             database: test_db_config(),
             scheduler: HostingConfig {
                 port: scheduler_port,

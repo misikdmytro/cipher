@@ -3,7 +3,9 @@ use tonic::transport::Channel;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::helpers::aws::{AwsSecretError, AwsSecretsClient};
+use proto::api::get_secret_response::Provider;
+
+use crate::helpers::aws::{AwsSecretError, AwsSecretsClientFactory};
 use crate::helpers::generator::SecretGenerator;
 use crate::services::types::{ServiceError, ServiceResult};
 
@@ -14,18 +16,18 @@ pub trait RotationService: Send + Sync {
 
 struct RotationServiceImpl {
     api_client: ApiServiceClient<Channel>,
-    aws_client: Box<dyn AwsSecretsClient>,
+    aws_factory: Box<dyn AwsSecretsClientFactory>,
     secret_generator: Box<dyn SecretGenerator>,
 }
 
 pub fn new_rotation_service(
     api_client: ApiServiceClient<Channel>,
-    aws_client: Box<dyn AwsSecretsClient>,
+    aws_factory: Box<dyn AwsSecretsClientFactory>,
     secret_generator: Box<dyn SecretGenerator>,
 ) -> impl RotationService + 'static {
     RotationServiceImpl {
         api_client,
-        aws_client,
+        aws_factory,
         secret_generator,
     }
 }
@@ -48,16 +50,26 @@ impl RotationService for RotationServiceImpl {
                 ServiceError::ApiError("failed to fetch secret".into())
             })?;
 
-        let path = response.into_inner().path;
+        let inner = response.into_inner();
+        let path = inner.path;
+        let role_arn = inner.provider.as_ref().map(|p| match p {
+            Provider::Aws(aws) => aws.role_arn.as_str(),
+        });
+
+        let aws_client = self.aws_factory.create(role_arn).await.map_err(|e| {
+            error!(error = ?e, "Failed to create AWS client");
+            ServiceError::AwsError("failed to assume role".into())
+        })?;
+
         let new_value = self.secret_generator.generate();
 
         info!(path = %path, "Writing new secret value to AWS Secrets Manager");
 
-        match self.aws_client.put_secret(&path, &new_value).await {
+        match aws_client.put_secret(&path, &new_value).await {
             Ok(()) => Ok(()),
             Err(AwsSecretError::NotFound) => {
                 info!(path = %path, "Secret not found in AWS, creating new secret");
-                self.aws_client
+                aws_client
                     .create_secret(&path, &new_value)
                     .await
                     .map_err(|e| {

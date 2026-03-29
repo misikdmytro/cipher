@@ -8,6 +8,7 @@ use crate::{config::AppConfig, repositories::models::secrets::Secret as SecretMo
 pub struct AddSecretRequest {
     pub path: String,
     pub cron_expression: String,
+    pub aws_role_arn: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,11 +59,12 @@ impl SecretsRepository for SecretsRepositoryImpl {
         let created_at = chrono::Utc::now().naive_utc();
 
         sqlx::query_as::<_, SecretModel>(
-            "INSERT INTO secrets (id, path, cron, created_at, updated_at) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+            "INSERT INTO secrets (id, path, cron, aws_role_arn, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
         )
         .bind(id)
         .bind(request.path)
         .bind(request.cron_expression)
+        .bind(request.aws_role_arn)
         .bind(created_at)
         .bind(None::<chrono::NaiveDateTime>)
         .fetch_one(&self.pool)
@@ -88,7 +90,7 @@ impl SecretsRepository for SecretsRepositoryImpl {
 
     async fn get_secret_by_id(&self, id: uuid::Uuid) -> Result<Secret, GetSecretError> {
         sqlx::query_as::<_, SecretModel>(
-            "SELECT id, path, created_at, updated_at FROM secrets WHERE id = $1",
+            "SELECT id, path, aws_role_arn, created_at, updated_at FROM secrets WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)

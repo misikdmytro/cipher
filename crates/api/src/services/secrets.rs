@@ -16,7 +16,12 @@ use crate::{
 #[async_trait::async_trait]
 pub trait SecretsService: Send + Sync {
     async fn get_secret_by_id(&self, id: Uuid) -> ServiceResult<Secret>;
-    async fn create_secret(&self, path: String, cron_expression: String) -> ServiceResult<Uuid>;
+    async fn create_secret(
+        &self,
+        path: String,
+        cron_expression: String,
+        aws_role_arn: Option<String>,
+    ) -> ServiceResult<Uuid>;
 }
 
 struct SecretsServiceImpl {
@@ -49,10 +54,16 @@ impl SecretsService for SecretsServiceImpl {
             })
     }
 
-    async fn create_secret(&self, path: String, cron_expression: String) -> ServiceResult<Uuid> {
+    async fn create_secret(
+        &self,
+        path: String,
+        cron_expression: String,
+        aws_role_arn: Option<String>,
+    ) -> ServiceResult<Uuid> {
         let request = AddSecretRequest {
             path,
             cron_expression: cron_expression.clone(),
+            aws_role_arn,
         };
         let secret = self.repository.save_secret(request).await.map_err(|e| {
             error!(error = ?e, "Failed to save secret");

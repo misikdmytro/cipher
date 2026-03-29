@@ -8,13 +8,23 @@ message GetSecretRequest {
   string secret_id = 1;
 }
 
+// AWS-specific provider configuration
+message AwsConfig {
+  string role_arn = 1;
+}
+
 // Response message containing the secret details
 message GetSecretResponse {
   // The ID of the secret
   string secret_id = 1;
 
-  // The value of the secret
+  // The logical path of the secret
   string path = 2;
+
+  // Provider-specific configuration
+  oneof provider {
+    AwsConfig aws = 3;
+  }
 }
 
 // The API service definition.

@@ -3512,6 +3512,7 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-sdk-secretsmanager",
+ "aws-sdk-sts",
  "common",
  "interfaces",
  "lapin",

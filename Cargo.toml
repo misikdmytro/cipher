@@ -17,6 +17,7 @@ apalis-postgres = { version = "1.0.0-rc.4" }
 async-trait = "0.1"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-secretsmanager = "1"
+aws-sdk-sts = "1"
 axum = { version = "0.8" }
 chrono = "0.4"
 config = { version = "0.15", features = ["toml"] }

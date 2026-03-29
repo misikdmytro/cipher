@@ -6,15 +6,33 @@ pub struct GetSecretRequest {
     #[prost(string, tag = "1")]
     pub secret_id: ::prost::alloc::string::String,
 }
+/// AWS-specific provider configuration
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AwsConfig {
+    #[prost(string, tag = "1")]
+    pub role_arn: ::prost::alloc::string::String,
+}
 /// Response message containing the secret details
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetSecretResponse {
     /// The ID of the secret
     #[prost(string, tag = "1")]
     pub secret_id: ::prost::alloc::string::String,
-    /// The value of the secret
+    /// The logical path of the secret
     #[prost(string, tag = "2")]
     pub path: ::prost::alloc::string::String,
+    /// Provider-specific configuration
+    #[prost(oneof = "get_secret_response::Provider", tags = "3")]
+    pub provider: ::core::option::Option<get_secret_response::Provider>,
+}
+/// Nested message and enum types in `GetSecretResponse`.
+pub mod get_secret_response {
+    /// Provider-specific configuration
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Provider {
+        #[prost(message, tag = "3")]
+        Aws(super::AwsConfig),
+    }
 }
 /// Generated client implementations.
 pub mod api_service_client {

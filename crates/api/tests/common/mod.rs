@@ -178,6 +178,27 @@ impl TestApp {
             .unwrap()
             .is_some()
     }
+
+    pub async fn get_secrets(&self, query: &str) -> reqwest::Response {
+        let url = if query.is_empty() {
+            format!("{}/secrets", self.base_url)
+        } else {
+            format!("{}/secrets?{}", self.base_url, query)
+        };
+        self.http
+            .get(url)
+            .send()
+            .await
+            .expect("HTTP request to GET /secrets failed")
+    }
+
+    pub async fn get_secret_by_id(&self, id: uuid::Uuid) -> reqwest::Response {
+        self.http
+            .get(format!("{}/secrets/{}", self.base_url, id))
+            .send()
+            .await
+            .expect("HTTP request to GET /secrets/{id} failed")
+    }
 }
 
 fn test_db_config() -> DatabaseConfig {

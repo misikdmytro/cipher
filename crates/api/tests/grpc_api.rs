@@ -14,6 +14,7 @@ async fn get_secret_returns_path_for_existing_secret() {
         .post_secret(json!({
             "path": path,
             "cron_expression": "0 0 0 * * * *",
+            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
         }))
         .await;
 

@@ -6,9 +6,12 @@ use tonic::transport::Channel;
 use tracing::error;
 use uuid::Uuid;
 
+pub use crate::repositories::secrets::SecretsPage;
+
 use crate::{
     repositories::secrets::{
-        AddSecretRequest, DeleteSecretRequest, GetSecretError, SecretsRepository,
+        AddSecretRequest, DeleteSecretRequest, GetSecretError, ListSecretsRequest,
+        SecretsRepository,
     },
     services::types::{ServiceError, ServiceResult},
 };
@@ -16,6 +19,7 @@ use crate::{
 #[async_trait::async_trait]
 pub trait SecretsService: Send + Sync {
     async fn get_secret_by_id(&self, id: Uuid) -> ServiceResult<Secret>;
+    async fn list_secrets(&self, limit: i64, offset: i64) -> ServiceResult<SecretsPage>;
     async fn create_secret(
         &self,
         path: String,
@@ -41,6 +45,16 @@ pub fn new_secrets_service(
 
 #[async_trait::async_trait]
 impl SecretsService for SecretsServiceImpl {
+    async fn list_secrets(&self, limit: i64, offset: i64) -> ServiceResult<SecretsPage> {
+        self.repository
+            .list_secrets(ListSecretsRequest { limit, offset })
+            .await
+            .map_err(|e| {
+                error!(error = ?e, "Database error while listing secrets");
+                ServiceError::PersistenceError("database error".into())
+            })
+    }
+
     async fn get_secret_by_id(&self, id: Uuid) -> ServiceResult<Secret> {
         self.repository
             .get_secret_by_id(id)

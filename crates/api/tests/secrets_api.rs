@@ -5,6 +5,19 @@ use rstest::rstest;
 use serde_json::json;
 use uuid::Uuid;
 
+async fn create_secret(app: &TestApp) -> Uuid {
+    let response = app
+        .post_secret(json!({
+            "path": format!("test/helper/{}", Uuid::new_v4()),
+            "cron_expression": "0 0 0 * * * *",
+            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
+        }))
+        .await;
+    assert_eq!(response.status(), 201, "helper: failed to create secret");
+    let body: serde_json::Value = response.json().await.unwrap();
+    Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
+}
+
 #[tokio::test]
 async fn create_secret_returns_201_with_uuid() {
     let app = TestApp::spawn().await;
@@ -13,6 +26,7 @@ async fn create_secret_returns_201_with_uuid() {
         .post_secret(json!({
             "path": "prod/payments/stripe_api_key",
             "cron_expression": "0 0 0 * * * *",
+            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
         }))
         .await;
 
@@ -34,6 +48,7 @@ async fn create_secret_persists_to_database() {
         .post_secret(json!({
             "path": path,
             "cron_expression": "0 0 0 * * * *",
+            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
         }))
         .await;
 
@@ -56,6 +71,7 @@ async fn create_secret_forwards_schedule_request_to_scheduler() {
         .post_secret(json!({
             "path": format!("test/scheduler-call/{}", Uuid::new_v4()),
             "cron_expression": cron,
+            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
         }))
         .await;
 
@@ -129,6 +145,7 @@ async fn create_secret_rolls_back_on_scheduler_failure() {
         .post_secret(json!({
             "path": path,
             "cron_expression": "0 0 0 * * * *",
+            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
         }))
         .await;
 
@@ -137,4 +154,163 @@ async fn create_secret_rolls_back_on_scheduler_failure() {
         !app.secret_exists_by_path(&path).await,
         "secret should have been rolled back after scheduler failure"
     );
+}
+
+// --- GET /secrets ---
+
+#[tokio::test]
+async fn list_secrets_returns_200_with_correct_shape() {
+    let app = TestApp::spawn().await;
+
+    let response = app.get_secrets("").await;
+
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["items"].is_array());
+    assert!(body["total"].is_number());
+    assert!(body["limit"].is_number());
+    assert!(body["offset"].is_number());
+}
+
+#[tokio::test]
+async fn list_secrets_newly_created_secret_appears_in_first_page() {
+    let app = TestApp::spawn().await;
+    let id = create_secret(&app).await;
+
+    // Newly created secrets sort first (created_at DESC), so limit=100 is enough
+    let response = app.get_secrets("limit=100").await;
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    let items = body["items"].as_array().unwrap();
+    let found = items
+        .iter()
+        .any(|item| item["id"].as_str() == Some(&id.to_string()));
+    assert!(found, "newly created secret {id} should appear in the list");
+}
+
+#[tokio::test]
+async fn list_secrets_respects_limit() {
+    let app = TestApp::spawn().await;
+    create_secret(&app).await;
+
+    let response = app.get_secrets("limit=1").await;
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["items"].as_array().unwrap().len() <= 1);
+    assert_eq!(body["limit"].as_i64().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn list_secrets_clamps_limit_to_100() {
+    let app = TestApp::spawn().await;
+
+    let response = app.get_secrets("limit=999").await;
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["limit"].as_i64().unwrap(), 100);
+    assert!(body["items"].as_array().unwrap().len() <= 100);
+}
+
+#[tokio::test]
+async fn list_secrets_offset_skips_first_item() {
+    let app = TestApp::spawn().await;
+    // Ensure at least 2 secrets exist
+    create_secret(&app).await;
+    create_secret(&app).await;
+
+    let body0: serde_json::Value = app
+        .get_secrets("limit=1&offset=0")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let body1: serde_json::Value = app
+        .get_secrets("limit=1&offset=1")
+        .await
+        .json()
+        .await
+        .unwrap();
+
+    assert!(body0["total"].as_i64().unwrap() >= 2);
+
+    let id0 = body0["items"][0]["id"].as_str().expect("item at offset=0");
+    let id1 = body1["items"][0]["id"].as_str().expect("item at offset=1");
+    assert_ne!(id0, id1, "offset=1 should skip the first item");
+}
+
+#[tokio::test]
+async fn list_secrets_total_reflects_created_secrets() {
+    let app = TestApp::spawn().await;
+
+    let before: serde_json::Value = app.get_secrets("").await.json().await.unwrap();
+    let total_before = before["total"].as_i64().unwrap();
+
+    create_secret(&app).await;
+    create_secret(&app).await;
+
+    let after: serde_json::Value = app.get_secrets("").await.json().await.unwrap();
+    let total_after = after["total"].as_i64().unwrap();
+
+    assert!(total_after >= total_before + 2, "total should have grown by at least 2");
+}
+
+// --- GET /secrets/{id} ---
+
+#[tokio::test]
+async fn get_secret_by_id_returns_200_with_expected_fields() {
+    let app = TestApp::spawn().await;
+    let path = format!("test/get-by-id/{}", Uuid::new_v4());
+
+    let created: serde_json::Value = app
+        .post_secret(json!({
+            "path": path,
+            "cron_expression": "0 0 0 * * * *",
+            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
+        }))
+        .await
+        .json()
+        .await
+        .unwrap();
+    let id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    let response = app.get_secret_by_id(id).await;
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["id"].as_str().unwrap(), id.to_string());
+    assert_eq!(body["path"].as_str().unwrap(), path);
+    assert_eq!(
+        body["aws"]["role_arn"].as_str().unwrap(),
+        "arn:aws:iam::123456789012:role/TestRotator"
+    );
+    assert!(
+        body["created_at"].is_string(),
+        "created_at should be present"
+    );
+}
+
+#[tokio::test]
+async fn get_secret_by_id_returns_404_for_unknown_id() {
+    let app = TestApp::spawn().await;
+
+    let response = app.get_secret_by_id(Uuid::new_v4()).await;
+
+    assert_eq!(response.status(), 404);
+}
+
+#[tokio::test]
+async fn get_secret_by_id_with_invalid_uuid_returns_400() {
+    let app = TestApp::spawn().await;
+
+    let response = app
+        .http
+        .get(format!("{}/secrets/not-a-uuid", app.base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 400);
 }

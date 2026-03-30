@@ -19,12 +19,28 @@ pub struct DeleteSecretRequest {
 common::repo_error!(AddSecretError);
 common::repo_error!(DeleteSecretError, NotFound);
 common::repo_error!(GetSecretError, NotFound);
+common::repo_error!(ListSecretsError);
+
+#[derive(Debug, Clone)]
+pub struct ListSecretsRequest {
+    pub limit: i64,
+    pub offset: i64,
+}
+
+pub struct SecretsPage {
+    pub items: Vec<Secret>,
+    pub total: i64,
+}
 
 #[async_trait::async_trait]
 pub trait SecretsRepository: Send + Sync {
     async fn save_secret(&self, request: AddSecretRequest) -> Result<Secret, AddSecretError>;
     async fn delete_secret(&self, request: DeleteSecretRequest) -> Result<(), DeleteSecretError>;
     async fn get_secret_by_id(&self, id: uuid::Uuid) -> Result<Secret, GetSecretError>;
+    async fn list_secrets(
+        &self,
+        request: ListSecretsRequest,
+    ) -> Result<SecretsPage, ListSecretsError>;
 }
 
 struct SecretsRepositoryImpl {
@@ -97,5 +113,29 @@ impl SecretsRepository for SecretsRepositoryImpl {
         .await
         .map_err(GetSecretError::from)
         .and_then(|opt| opt.map(Secret::from).ok_or(GetSecretError::NotFound))
+    }
+
+    async fn list_secrets(
+        &self,
+        request: ListSecretsRequest,
+    ) -> Result<SecretsPage, ListSecretsError> {
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM secrets")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(ListSecretsError::from)?;
+
+        let items = sqlx::query_as::<_, SecretModel>(
+            "SELECT id, path, aws_role_arn, created_at, updated_at FROM secrets ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+        )
+        .bind(request.limit)
+        .bind(request.offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ListSecretsError::from)?
+        .into_iter()
+        .map(Secret::from)
+        .collect();
+
+        Ok(SecretsPage { items, total })
     }
 }

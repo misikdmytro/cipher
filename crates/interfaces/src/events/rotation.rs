@@ -12,8 +12,30 @@ pub struct RotationStarted {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RotationDoneDetails {
+    Single {
+        path: String,
+    },
+    BlueGreen {
+        active_slot: String,
+        outdated_path: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RotationDone {
     pub secret_id: Uuid,
+    pub details: RotationDoneDetails,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RotationReady {
+    pub secret_id: Uuid,
+    pub active_slot: String,
+    pub active_path: String,
+    pub ready_slot: String,
+    pub ready_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -135,9 +157,12 @@ mod tests {
     // RotationDone tests
 
     #[test]
-    fn done_serialization_round_trip() {
+    fn done_single_serialization_round_trip() {
         let event = RotationDone {
             secret_id: Uuid::parse_str("08b81283-979b-4ce6-94c0-81311195201d").unwrap(),
+            details: RotationDoneDetails::Single {
+                path: "prod/my-secret".to_string(),
+            },
         };
 
         let json = serde_json::to_vec(&event).unwrap();
@@ -147,43 +172,91 @@ mod tests {
     }
 
     #[test]
-    fn done_serializes_to_expected_json_format() {
+    fn done_single_serializes_to_expected_json_format() {
         let event = RotationDone {
             secret_id: Uuid::parse_str("08b81283-979b-4ce6-94c0-81311195201d").unwrap(),
+            details: RotationDoneDetails::Single {
+                path: "prod/my-secret".to_string(),
+            },
         };
 
         let json_str = serde_json::to_string(&event).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
-        assert_eq!(
-            parsed["secret_id"], "08b81283-979b-4ce6-94c0-81311195201d",
-            "secret_id should serialize as UUID string"
-        );
+        assert_eq!(parsed["secret_id"], "08b81283-979b-4ce6-94c0-81311195201d");
+        assert_eq!(parsed["details"]["type"], "single");
+        assert_eq!(parsed["details"]["path"], "prod/my-secret");
     }
 
     #[test]
-    fn done_deserializes_from_json_string() {
-        let json = r#"{"secret_id":"08b81283-979b-4ce6-94c0-81311195201d"}"#;
-        let event: RotationDone = serde_json::from_str(json).unwrap();
+    fn done_blue_green_serialization_round_trip() {
+        let event = RotationDone {
+            secret_id: Uuid::parse_str("08b81283-979b-4ce6-94c0-81311195201d").unwrap(),
+            details: RotationDoneDetails::BlueGreen {
+                active_slot: "green".to_string(),
+                outdated_path: "prod/key-blue".to_string(),
+            },
+        };
 
-        assert_eq!(
-            event.secret_id,
-            Uuid::parse_str("08b81283-979b-4ce6-94c0-81311195201d").unwrap()
-        );
+        let json = serde_json::to_vec(&event).unwrap();
+        let deserialized: RotationDone = serde_json::from_slice(&json).unwrap();
+
+        assert_eq!(event, deserialized);
     }
 
     #[test]
-    fn done_rejects_missing_secret_id() {
-        let json = r#"{}"#;
-        let result = serde_json::from_str::<RotationDone>(json);
-        assert!(result.is_err());
+    fn done_blue_green_serializes_to_expected_json_format() {
+        let event = RotationDone {
+            secret_id: Uuid::parse_str("08b81283-979b-4ce6-94c0-81311195201d").unwrap(),
+            details: RotationDoneDetails::BlueGreen {
+                active_slot: "green".to_string(),
+                outdated_path: "prod/key-blue".to_string(),
+            },
+        };
+
+        let json_str = serde_json::to_string(&event).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["details"]["type"], "blue_green");
+        assert_eq!(parsed["details"]["active_slot"], "green");
+        assert_eq!(parsed["details"]["outdated_path"], "prod/key-blue");
+    }
+
+    // RotationReady tests
+
+    #[test]
+    fn ready_serialization_round_trip() {
+        let event = RotationReady {
+            secret_id: Uuid::parse_str("08b81283-979b-4ce6-94c0-81311195201d").unwrap(),
+            active_slot: "blue".to_string(),
+            active_path: "prod/key-blue".to_string(),
+            ready_slot: "green".to_string(),
+            ready_path: "prod/key-green".to_string(),
+        };
+
+        let json = serde_json::to_vec(&event).unwrap();
+        let deserialized: RotationReady = serde_json::from_slice(&json).unwrap();
+
+        assert_eq!(event, deserialized);
     }
 
     #[test]
-    fn done_rejects_invalid_uuid() {
-        let json = r#"{"secret_id":"not-a-uuid"}"#;
-        let result = serde_json::from_str::<RotationDone>(json);
-        assert!(result.is_err());
+    fn ready_serializes_to_expected_json_format() {
+        let event = RotationReady {
+            secret_id: Uuid::parse_str("08b81283-979b-4ce6-94c0-81311195201d").unwrap(),
+            active_slot: "blue".to_string(),
+            active_path: "prod/key-blue".to_string(),
+            ready_slot: "green".to_string(),
+            ready_path: "prod/key-green".to_string(),
+        };
+
+        let json_str = serde_json::to_string(&event).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["active_slot"], "blue");
+        assert_eq!(parsed["active_path"], "prod/key-blue");
+        assert_eq!(parsed["ready_slot"], "green");
+        assert_eq!(parsed["ready_path"], "prod/key-green");
     }
 
     // RotationFailed tests

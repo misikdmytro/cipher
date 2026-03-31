@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use common::rotation_publisher::RotationEventPublisher;
 use lapin::Channel;
 
-use crate::services::publisher::RotationEventPublisher;
 use crate::services::rotation::RotationService;
 
 pub struct AppState {

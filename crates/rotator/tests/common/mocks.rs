@@ -1,12 +1,15 @@
 use std::sync::{Arc, Mutex};
 
+use common::amqp::PublishError;
+use common::rotation_publisher::RotationEventPublisher;
 use rotator::helpers::aws::{AwsSecretError, AwsSecretsClient, AwsSecretsClientFactory};
 use rotator::helpers::generator::SecretGenerator;
-use rotator::services::publisher::{PublishError, RotationEventPublisher};
 
+use interfaces::events::rotation::RotationDoneDetails;
 use proto::api::{
-    AwsConfig, GetSecretRequest, GetSecretResponse, api_service_server::ApiService,
-    get_secret_response::Provider,
+    AwsConfig, GetSecretRequest, GetSecretResponse, SingleStrategyConfig,
+    api_service_server::ApiService,
+    get_secret_response::{Provider, Strategy},
 };
 use uuid::Uuid;
 
@@ -26,17 +29,21 @@ impl MockApiService {
     pub fn ok(secret_id: &str, path: &str) -> Self {
         Self::new(vec![Ok(GetSecretResponse {
             secret_id: secret_id.to_string(),
-            path: path.to_string(),
             provider: None,
+            strategy: Some(Strategy::Single(SingleStrategyConfig {
+                path: path.to_string(),
+            })),
         })])
     }
 
     pub fn ok_with_aws(secret_id: &str, path: &str, role_arn: &str) -> Self {
         Self::new(vec![Ok(GetSecretResponse {
             secret_id: secret_id.to_string(),
-            path: path.to_string(),
             provider: Some(Provider::Aws(AwsConfig {
                 role_arn: role_arn.to_string(),
+            })),
+            strategy: Some(Strategy::Single(SingleStrategyConfig {
+                path: path.to_string(),
             })),
         })])
     }
@@ -230,6 +237,10 @@ impl MockRotationEventPublisher {
 
 #[async_trait::async_trait]
 impl RotationEventPublisher for MockRotationEventPublisher {
+    async fn publish_scheduled(&self, _secret_id: Uuid) -> Result<(), PublishError> {
+        Ok(())
+    }
+
     async fn publish_started(&self, secret_id: Uuid) -> Result<(), PublishError> {
         self.inner.started_calls.lock().unwrap().push(secret_id);
 
@@ -241,8 +252,23 @@ impl RotationEventPublisher for MockRotationEventPublisher {
         Ok(())
     }
 
-    async fn publish_done(&self, secret_id: Uuid) -> Result<(), PublishError> {
+    async fn publish_done(
+        &self,
+        secret_id: Uuid,
+        _details: RotationDoneDetails,
+    ) -> Result<(), PublishError> {
         self.inner.done_calls.lock().unwrap().push(secret_id);
+        Ok(())
+    }
+
+    async fn publish_ready(
+        &self,
+        _secret_id: Uuid,
+        _active_slot: String,
+        _active_path: String,
+        _ready_slot: String,
+        _ready_path: String,
+    ) -> Result<(), PublishError> {
         Ok(())
     }
 

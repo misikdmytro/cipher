@@ -9,6 +9,8 @@ use api::repositories::secrets::new_secrets_repository;
 use api::services::secrets::new_secrets_service;
 use api::services::webhooks::new_webhooks_service;
 use api::state::AppState;
+use common::rotation_publisher::RotationEventPublisher;
+use interfaces::events::rotation::RotationDoneDetails;
 use mocks::{MockNotificatorService, MockSchedulerService};
 use proto::api::api_service_client::ApiServiceClient;
 use proto::api::api_service_server::ApiServiceServer;
@@ -69,6 +71,7 @@ impl TestApp {
         let config = AppConfig {
             log: Default::default(),
             database: test_db_config(),
+            rabbitmq: Default::default(),
             scheduler: HostingConfig {
                 port: scheduler_port,
                 ..Default::default()
@@ -95,7 +98,11 @@ impl TestApp {
             .connect_lazy();
         let scheduler_client =
             proto::scheduler::scheduler_service_client::SchedulerServiceClient::new(channel);
-        let secrets_service = new_secrets_service(Box::new(repository), scheduler_client);
+        let secrets_service = new_secrets_service(
+            Box::new(repository),
+            scheduler_client,
+            Box::new(NoOpRotationEventPublisher),
+        );
 
         let notificator_endpoint = format!("http://127.0.0.1:{}", notificator_port);
         let notificator_channel = tonic::transport::Endpoint::new(notificator_endpoint)
@@ -170,8 +177,8 @@ impl TestApp {
             .is_some()
     }
 
-    pub async fn secret_exists_by_path(&self, path: &str) -> bool {
-        sqlx::query("SELECT 1 FROM secrets WHERE path = $1")
+    pub async fn secret_exists_by_single_path(&self, path: &str) -> bool {
+        sqlx::query("SELECT 1 FROM strategy_single WHERE path = $1")
             .bind(path)
             .fetch_optional(&self.db)
             .await
@@ -198,6 +205,42 @@ impl TestApp {
             .send()
             .await
             .expect("HTTP request to GET /secrets/{id} failed")
+    }
+}
+
+struct NoOpRotationEventPublisher;
+
+#[async_trait::async_trait]
+impl RotationEventPublisher for NoOpRotationEventPublisher {
+    async fn publish_scheduled(&self, _: uuid::Uuid) -> Result<(), common::amqp::PublishError> {
+        Ok(())
+    }
+    async fn publish_started(&self, _: uuid::Uuid) -> Result<(), common::amqp::PublishError> {
+        Ok(())
+    }
+    async fn publish_done(
+        &self,
+        _: uuid::Uuid,
+        _: RotationDoneDetails,
+    ) -> Result<(), common::amqp::PublishError> {
+        Ok(())
+    }
+    async fn publish_ready(
+        &self,
+        _: uuid::Uuid,
+        _: String,
+        _: String,
+        _: String,
+        _: String,
+    ) -> Result<(), common::amqp::PublishError> {
+        Ok(())
+    }
+    async fn publish_failed(
+        &self,
+        _: uuid::Uuid,
+        _: String,
+    ) -> Result<(), common::amqp::PublishError> {
+        Ok(())
     }
 }
 

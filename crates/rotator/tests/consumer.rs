@@ -62,7 +62,7 @@ async fn publishes_started_and_done_on_success() {
 
     assert!(result.is_ok());
     assert_eq!(publisher.started_calls(), vec![secret_id]);
-    assert_eq!(publisher.done_calls(), vec![secret_id]);
+    assert!(publisher.done_calls().is_empty());
     assert!(publisher.failed_calls().is_empty());
 }
 

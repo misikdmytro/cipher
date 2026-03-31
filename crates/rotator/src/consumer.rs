@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use common::consumer::{self, ConsumerConfig};
+use common::rotation_publisher::RotationEventPublisher;
 use interfaces::events::rotation::RotationScheduled;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::services::publisher::RotationEventPublisher;
 use crate::services::rotation::RotationService;
 use crate::services::types::ServiceError;
 use crate::state::AppState;
@@ -66,9 +66,6 @@ async fn handle_delivery(state: &AppState, delivery: &lapin::message::Delivery) 
 
     match state.rotation_service.rotate(secret_id).await {
         Ok(()) => {
-            if let Err(e) = state.publisher.publish_done(secret_id).await {
-                error!(error = ?e, "Failed to publish rotation.done");
-            }
             consumer::ack(delivery).await;
         }
         Err(ServiceError::NotFound) => {
@@ -107,12 +104,7 @@ pub async fn process_rotation(
         .map_err(ProcessError::Publish)?;
 
     match rotation_service.rotate(secret_id).await {
-        Ok(()) => {
-            if let Err(e) = publisher.publish_done(secret_id).await {
-                error!(error = ?e, "Failed to publish rotation.done");
-            }
-            Ok(())
-        }
+        Ok(()) => Ok(()),
         Err(ServiceError::NotFound) => {
             if let Err(e) = publisher
                 .publish_failed(secret_id, "secret not found".to_string())

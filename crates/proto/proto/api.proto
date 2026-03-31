@@ -2,33 +2,48 @@ syntax = "proto3";
 
 package api;
 
-// Request message for retrieving a secret by its ID
+// Request to fetch a secret's configuration by its ID.
 message GetSecretRequest {
-  // The ID of the secret to retrieve
   string secret_id = 1;
 }
 
-// AWS-specific provider configuration
+// AWS provider configuration for secrets stored in AWS Secrets Manager.
 message AwsConfig {
+  // IAM role ARN to assume when accessing the secret.
   string role_arn = 1;
 }
 
-// Response message containing the secret details
+// Single-path rotation strategy: one secret path, rotated in place.
+message SingleStrategyConfig {
+  string path = 1;
+}
+
+// Blue-green rotation strategy: two secret paths with an active slot.
+message BlueGreenStrategyConfig {
+  string blue_path   = 1;
+  string green_path  = 2;
+  // Currently active slot: "blue" or "green".
+  string active_slot = 3;
+}
+
+// Full secret configuration returned by the API.
 message GetSecretResponse {
-  // The ID of the secret
   string secret_id = 1;
 
-  // The logical path of the secret
-  string path = 2;
-
-  // Provider-specific configuration
+  // Cloud provider holding the secret. Exactly one must be set.
   oneof provider {
-    AwsConfig aws = 3;
+    AwsConfig aws = 2;
+  }
+
+  // Rotation strategy. Exactly one must be set.
+  oneof strategy {
+    SingleStrategyConfig    single     = 3;
+    BlueGreenStrategyConfig blue_green = 4;
   }
 }
 
-// The API service definition.
+// Internal gRPC API consumed by the rotator to fetch secret configuration.
 service ApiService {
-  // GetSecret retrieves a secret by its ID.
+  // Retrieves a secret's configuration (strategy, provider) by ID.
   rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
 }

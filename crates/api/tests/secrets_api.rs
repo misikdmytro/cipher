@@ -5,14 +5,17 @@ use rstest::rstest;
 use serde_json::json;
 use uuid::Uuid;
 
+fn single_body(path: &str) -> serde_json::Value {
+    json!({
+        "cron_expression": "0 0 0 * * * *",
+        "strategy": { "single": { "path": path } },
+        "provider": { "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" } }
+    })
+}
+
 async fn create_secret(app: &TestApp) -> Uuid {
-    let response = app
-        .post_secret(json!({
-            "path": format!("test/helper/{}", Uuid::new_v4()),
-            "cron_expression": "0 0 0 * * * *",
-            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
-        }))
-        .await;
+    let path = format!("test/helper/{}", Uuid::new_v4());
+    let response = app.post_secret(single_body(&path)).await;
     assert_eq!(response.status(), 201, "helper: failed to create secret");
     let body: serde_json::Value = response.json().await.unwrap();
     Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
@@ -23,11 +26,7 @@ async fn create_secret_returns_201_with_uuid() {
     let app = TestApp::spawn().await;
 
     let response = app
-        .post_secret(json!({
-            "path": "prod/payments/stripe_api_key",
-            "cron_expression": "0 0 0 * * * *",
-            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
-        }))
+        .post_secret(single_body("prod/payments/stripe_api_key"))
         .await;
 
     assert_eq!(response.status(), 201);
@@ -44,13 +43,7 @@ async fn create_secret_persists_to_database() {
     let app = TestApp::spawn().await;
     let path = format!("test/db-persist/{}", Uuid::new_v4());
 
-    let response = app
-        .post_secret(json!({
-            "path": path,
-            "cron_expression": "0 0 0 * * * *",
-            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
-        }))
-        .await;
+    let response = app.post_secret(single_body(&path)).await;
 
     assert_eq!(response.status(), 201);
     let body: serde_json::Value = response.json().await.unwrap();
@@ -69,9 +62,9 @@ async fn create_secret_forwards_schedule_request_to_scheduler() {
 
     let response = app
         .post_secret(json!({
-            "path": format!("test/scheduler-call/{}", Uuid::new_v4()),
             "cron_expression": cron,
-            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
+            "strategy": { "single": { "path": format!("test/scheduler-call/{}", Uuid::new_v4()) } },
+            "provider": { "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" } }
         }))
         .await;
 
@@ -83,17 +76,32 @@ async fn create_secret_forwards_schedule_request_to_scheduler() {
 }
 
 #[rstest]
-#[case::empty_path(
-    json!({"path": "", "cron_expression": "0 0 0 * * * *"}),
-    None,
-)]
-#[case::path_too_long(
-    json!({"path": "a".repeat(256), "cron_expression": "0 0 0 * * * *"}),
-    None,
-)]
 #[case::invalid_cron(
-    json!({"path": "some/valid/path", "cron_expression": "not-a-cron"}),
+    json!({
+        "cron_expression": "not-a-cron",
+        "strategy": { "single": { "path": "some/valid/path" } },
+        "provider": { "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" } }
+    }),
     Some("cron"),
+)]
+#[case::missing_provider(
+    json!({
+        "cron_expression": "0 0 0 * * * *",
+        "strategy": { "single": { "path": "some/valid/path" } },
+        "provider": {}
+    }),
+    None,
+)]
+#[case::both_strategies(
+    json!({
+        "cron_expression": "0 0 0 * * * *",
+        "strategy": {
+            "single": { "path": "a/path" },
+            "blue_green": { "blue_path": "a/path", "green_path": "b/path" }
+        },
+        "provider": { "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" } }
+    }),
+    None,
 )]
 #[tokio::test]
 async fn create_secret_with_invalid_body_returns_400(
@@ -117,8 +125,8 @@ async fn create_secret_with_invalid_body_returns_400(
 }
 
 #[rstest]
-#[case::missing_field(r#"{"path": "some/valid/path"}"#, 422)]
-#[case::wrong_field_type(r#"{"path": 123, "cron_expression": "0 0 0 * * * *"}"#, 422)]
+#[case::missing_field(r#"{"cron_expression": "0 0 0 * * * *"}"#, 422)]
+#[case::wrong_field_type(r#"{"cron_expression": 123}"#, 422)]
 #[case::malformed_json(r#"{ bad json }"#, 400)]
 #[tokio::test]
 async fn create_secret_with_malformed_body(#[case] body: &str, #[case] expected_status: u16) {
@@ -141,17 +149,11 @@ async fn create_secret_rolls_back_on_scheduler_failure() {
     let app = TestApp::spawn_with_failing_scheduler().await;
     let path = format!("test/rollback/{}", Uuid::new_v4());
 
-    let response = app
-        .post_secret(json!({
-            "path": path,
-            "cron_expression": "0 0 0 * * * *",
-            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
-        }))
-        .await;
+    let response = app.post_secret(single_body(&path)).await;
 
     assert_eq!(response.status(), 500);
     assert!(
-        !app.secret_exists_by_path(&path).await,
+        !app.secret_exists_by_single_path(&path).await,
         "secret should have been rolled back after scheduler failure"
     );
 }
@@ -177,7 +179,6 @@ async fn list_secrets_newly_created_secret_appears_in_first_page() {
     let app = TestApp::spawn().await;
     let id = create_secret(&app).await;
 
-    // Newly created secrets sort first (created_at DESC), so limit=100 is enough
     let response = app.get_secrets("limit=100").await;
     assert_eq!(response.status(), 200);
 
@@ -217,7 +218,6 @@ async fn list_secrets_clamps_limit_to_100() {
 #[tokio::test]
 async fn list_secrets_offset_skips_first_item() {
     let app = TestApp::spawn().await;
-    // Ensure at least 2 secrets exist
     create_secret(&app).await;
     create_secret(&app).await;
 
@@ -254,7 +254,10 @@ async fn list_secrets_total_reflects_created_secrets() {
     let after: serde_json::Value = app.get_secrets("").await.json().await.unwrap();
     let total_after = after["total"].as_i64().unwrap();
 
-    assert!(total_after >= total_before + 2, "total should have grown by at least 2");
+    assert!(
+        total_after >= total_before + 2,
+        "total should have grown by at least 2"
+    );
 }
 
 // --- GET /secrets/{id} ---
@@ -265,11 +268,7 @@ async fn get_secret_by_id_returns_200_with_expected_fields() {
     let path = format!("test/get-by-id/{}", Uuid::new_v4());
 
     let created: serde_json::Value = app
-        .post_secret(json!({
-            "path": path,
-            "cron_expression": "0 0 0 * * * *",
-            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
-        }))
+        .post_secret(single_body(&path))
         .await
         .json()
         .await
@@ -281,9 +280,9 @@ async fn get_secret_by_id_returns_200_with_expected_fields() {
 
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["id"].as_str().unwrap(), id.to_string());
-    assert_eq!(body["path"].as_str().unwrap(), path);
+    assert_eq!(body["strategy"]["single"]["path"].as_str().unwrap(), path);
     assert_eq!(
-        body["aws"]["role_arn"].as_str().unwrap(),
+        body["provider"]["aws"]["role_arn"].as_str().unwrap(),
         "arn:aws:iam::123456789012:role/TestRotator"
     );
     assert!(

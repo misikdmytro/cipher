@@ -1,9 +1,10 @@
+use common::rotation_publisher::RotationEventPublisher;
+use interfaces::events::rotation::RotationDoneDetails;
+use proto::api::get_secret_response::{Provider, Strategy};
 use proto::api::{GetSecretRequest, api_service_client::ApiServiceClient};
 use tonic::transport::Channel;
 use tracing::{error, info};
 use uuid::Uuid;
-
-use proto::api::get_secret_response::Provider;
 
 use crate::helpers::aws::{AwsSecretError, AwsSecretsClientFactory};
 use crate::helpers::generator::SecretGenerator;
@@ -18,17 +19,20 @@ struct RotationServiceImpl {
     api_client: ApiServiceClient<Channel>,
     aws_factory: Box<dyn AwsSecretsClientFactory>,
     secret_generator: Box<dyn SecretGenerator>,
+    publisher: Box<dyn RotationEventPublisher>,
 }
 
 pub fn new_rotation_service(
     api_client: ApiServiceClient<Channel>,
     aws_factory: Box<dyn AwsSecretsClientFactory>,
     secret_generator: Box<dyn SecretGenerator>,
+    publisher: Box<dyn RotationEventPublisher>,
 ) -> impl RotationService + 'static {
     RotationServiceImpl {
         api_client,
         aws_factory,
         secret_generator,
+        publisher,
     }
 }
 
@@ -51,7 +55,7 @@ impl RotationService for RotationServiceImpl {
             })?;
 
         let inner = response.into_inner();
-        let path = inner.path;
+
         let role_arn = inner.provider.as_ref().map(|p| match p {
             Provider::Aws(aws) => aws.role_arn.as_str(),
         });
@@ -61,26 +65,84 @@ impl RotationService for RotationServiceImpl {
             ServiceError::AwsError("failed to assume role".into())
         })?;
 
+        let strategy = inner.strategy.ok_or_else(|| {
+            error!("Secret has no strategy configured");
+            ServiceError::ApiError("missing strategy in secret response".into())
+        })?;
+
         let new_value = self.secret_generator.generate();
 
-        info!(path = %path, "Writing new secret value to AWS Secrets Manager");
+        match strategy {
+            Strategy::Single(s) => {
+                info!(path = %s.path, "Writing new secret value to AWS Secrets Manager (single strategy)");
 
-        match aws_client.put_secret(&path, &new_value).await {
-            Ok(()) => Ok(()),
-            Err(AwsSecretError::NotFound) => {
-                info!(path = %path, "Secret not found in AWS, creating new secret");
-                aws_client
-                    .create_secret(&path, &new_value)
+                put_or_create(&*aws_client, &s.path, &new_value).await?;
+
+                if let Err(e) = self
+                    .publisher
+                    .publish_done(
+                        secret_id,
+                        RotationDoneDetails::Single {
+                            path: s.path.clone(),
+                        },
+                    )
                     .await
-                    .map_err(|e| {
-                        error!(error = ?e, "Failed to create secret in AWS");
-                        ServiceError::AwsError("failed to create secret".into())
-                    })
+                {
+                    error!(error = ?e, "Failed to publish rotation.done for single strategy");
+                }
             }
-            Err(e) => {
-                error!(error = ?e, "Failed to write secret to AWS");
-                Err(ServiceError::AwsError("failed to write secret".into()))
+            Strategy::BlueGreen(bg) => {
+                let (inactive_slot, inactive_path, active_slot, active_path) =
+                    if bg.active_slot == "blue" {
+                        ("green", bg.green_path.clone(), "blue", bg.blue_path.clone())
+                    } else {
+                        ("blue", bg.blue_path.clone(), "green", bg.green_path.clone())
+                    };
+
+                info!(
+                    inactive_path = %inactive_path,
+                    "Writing new secret value to AWS Secrets Manager (blue_green strategy)"
+                );
+
+                put_or_create(&*aws_client, &inactive_path, &new_value).await?;
+
+                if let Err(e) = self
+                    .publisher
+                    .publish_ready(
+                        secret_id,
+                        active_slot.to_string(),
+                        active_path,
+                        inactive_slot.to_string(),
+                        inactive_path,
+                    )
+                    .await
+                {
+                    error!(error = ?e, "Failed to publish rotation.ready for blue_green strategy");
+                }
             }
+        }
+
+        Ok(())
+    }
+}
+
+async fn put_or_create(
+    aws_client: &dyn crate::helpers::aws::AwsSecretsClient,
+    path: &str,
+    value: &str,
+) -> ServiceResult<()> {
+    match aws_client.put_secret(path, value).await {
+        Ok(()) => Ok(()),
+        Err(AwsSecretError::NotFound) => {
+            info!(path = %path, "Secret not found in AWS, creating new secret");
+            aws_client.create_secret(path, value).await.map_err(|e| {
+                error!(error = ?e, "Failed to create secret in AWS");
+                ServiceError::AwsError("failed to create secret".into())
+            })
+        }
+        Err(e) => {
+            error!(error = ?e, "Failed to write secret to AWS");
+            Err(ServiceError::AwsError("failed to write secret".into()))
         }
     }
 }

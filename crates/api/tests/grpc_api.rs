@@ -1,20 +1,20 @@
 mod common;
 
 use common::TestApp;
-use proto::api::GetSecretRequest;
+use proto::api::{GetSecretRequest, get_secret_response::Strategy};
 use serde_json::json;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn get_secret_returns_path_for_existing_secret() {
+async fn get_secret_returns_strategy_for_existing_secret() {
     let app = TestApp::spawn().await;
     let path = format!("test/grpc/{}", Uuid::new_v4());
 
     let response = app
         .post_secret(json!({
-            "path": path,
             "cron_expression": "0 0 0 * * * *",
-            "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" }
+            "strategy": { "single": { "path": path } },
+            "provider": { "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" } }
         }))
         .await;
 
@@ -32,7 +32,7 @@ async fn get_secret_returns_path_for_existing_secret() {
 
     let inner = grpc_response.into_inner();
     assert_eq!(inner.secret_id, secret_id);
-    assert_eq!(inner.path, path);
+    assert!(matches!(inner.strategy, Some(Strategy::Single(s)) if s.path == path));
 }
 
 #[tokio::test]

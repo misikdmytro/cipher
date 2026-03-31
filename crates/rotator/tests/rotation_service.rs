@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use common::mocks::{
     FailingAwsSecretsClientFactory, MockApiService, MockAwsSecretsClient,
-    MockAwsSecretsClientFactory, MockSecretGenerator, RecordingAwsSecretsClientFactory,
+    MockAwsSecretsClientFactory, MockRotationEventPublisher, MockSecretGenerator,
+    RecordingAwsSecretsClientFactory,
 };
 use proto::api::{api_service_client::ApiServiceClient, api_service_server::ApiServiceServer};
 use rotator::services::rotation::{RotationService, new_rotation_service};
@@ -48,7 +49,12 @@ async fn rotate_puts_generated_secret_to_aws_path() {
     let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("generated-secret-value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(factory),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     svc.rotate(secret_id)
         .await
         .expect("rotation should succeed");
@@ -69,7 +75,12 @@ async fn rotate_sends_correct_secret_id_to_api() {
     let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(factory),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     svc.rotate(secret_id).await.unwrap();
 
     let requests = mock_api.received_requests();
@@ -87,7 +98,12 @@ async fn rotate_returns_not_found_when_api_returns_not_found() {
     let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(factory),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     let result = svc.rotate(Uuid::new_v4()).await;
 
     assert!(matches!(
@@ -106,7 +122,12 @@ async fn rotate_returns_api_error_on_grpc_failure() {
     let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(factory),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     let result = svc.rotate(Uuid::new_v4()).await;
 
     assert!(matches!(
@@ -129,7 +150,12 @@ async fn rotate_creates_secret_when_put_returns_not_found() {
     let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("new-value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(factory),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     svc.rotate(secret_id)
         .await
         .expect("rotation should succeed with create fallback");
@@ -150,7 +176,12 @@ async fn rotate_returns_aws_error_when_create_fallback_fails() {
     let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(factory),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     let result = svc.rotate(secret_id).await;
 
     assert!(matches!(
@@ -169,7 +200,12 @@ async fn rotate_returns_aws_error_when_put_fails() {
     let factory = MockAwsSecretsClientFactory::new(aws);
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(factory),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     let result = svc.rotate(secret_id).await;
 
     assert!(matches!(
@@ -193,7 +229,12 @@ async fn rotate_with_role_arn_passes_arn_to_factory() {
     let recording_handle = recording.clone();
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(recording), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(recording),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     svc.rotate(secret_id).await.unwrap();
 
     let arns = recording_handle.received_role_arns();
@@ -214,7 +255,12 @@ async fn rotate_without_role_arn_passes_none_to_factory() {
     let recording_handle = recording.clone();
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(recording), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(recording),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     svc.rotate(secret_id).await.unwrap();
 
     let arns = recording_handle.received_role_arns();
@@ -234,7 +280,12 @@ async fn rotate_returns_aws_error_when_role_assumption_fails() {
     let factory = FailingAwsSecretsClientFactory;
     let generator = Box::new(MockSecretGenerator::new("value"));
 
-    let svc = new_rotation_service(api_client(&endpoint), Box::new(factory), generator);
+    let svc = new_rotation_service(
+        api_client(&endpoint),
+        Box::new(factory),
+        generator,
+        Box::new(MockRotationEventPublisher::success()),
+    );
     let result = svc.rotate(secret_id).await;
 
     assert!(matches!(

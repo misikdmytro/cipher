@@ -4,6 +4,10 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use interfaces::secrets::{
+    ActiveSlot, AwsProviderConfig, BlueGreenStrategyConfig, ProviderConfig, SingleStrategyConfig,
+    StrategyConfig,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -23,17 +27,46 @@ fn validate_cron(expr: &str) -> Result<(), ValidationError> {
     })
 }
 
-/// AWS-specific configuration for cross-account role assumption.
+#[derive(Deserialize, ToSchema, Validate)]
+pub(in crate::handlers) struct SingleStrategyRequest {
+    #[schema(example = "prod/payments/stripe_api_key")]
+    #[validate(length(min = 1, max = 255))]
+    pub path: String,
+}
+
+#[derive(Deserialize, ToSchema, Validate)]
+pub(in crate::handlers) struct BlueGreenStrategyRequest {
+    #[schema(example = "prod/payments/stripe_api_key_blue")]
+    #[validate(length(min = 1, max = 255))]
+    pub blue_path: String,
+    #[schema(example = "prod/payments/stripe_api_key_green")]
+    #[validate(length(min = 1, max = 255))]
+    pub green_path: String,
+}
+
+#[derive(Deserialize, ToSchema, Validate)]
+pub(in crate::handlers) struct StrategyRequest {
+    #[validate(nested)]
+    pub single: Option<SingleStrategyRequest>,
+    #[validate(nested)]
+    pub blue_green: Option<BlueGreenStrategyRequest>,
+}
+
 #[derive(Deserialize, ToSchema, Validate)]
 pub(in crate::handlers) struct AwsConfigRequest {
-    /// The ARN of the IAM role to assume before rotating the secret.
     #[schema(example = "arn:aws:iam::123456789012:role/SecretRotator")]
     #[validate(length(min = 20, max = 2048))]
     pub role_arn: String,
 }
 
+#[derive(Deserialize, ToSchema, Validate)]
+pub(in crate::handlers) struct ProviderRequest {
+    #[validate(nested)]
+    pub aws: Option<AwsConfigRequest>,
+}
+
 fn validate_exactly_one_provider(req: &SaveSecretRequest) -> Result<(), ValidationError> {
-    let count = [req.aws.is_some()].iter().filter(|&&x| x).count();
+    let count = [req.provider.aws.is_some()].iter().filter(|&&x| x).count();
     match count {
         1 => Ok(()),
         0 => Err(ValidationError::new("missing_provider")
@@ -44,23 +77,56 @@ fn validate_exactly_one_provider(req: &SaveSecretRequest) -> Result<(), Validati
     }
 }
 
+fn validate_exactly_one_strategy(req: &SaveSecretRequest) -> Result<(), ValidationError> {
+    let count = [
+        req.strategy.single.is_some(),
+        req.strategy.blue_green.is_some(),
+    ]
+    .iter()
+    .filter(|&&x| x)
+    .count();
+    match count {
+        1 => Ok(()),
+        0 => Err(ValidationError::new("missing_strategy").with_message(
+            "Exactly one strategy must be specified (\"single\" or \"blue_green\")".into(),
+        )),
+        _ => Err(ValidationError::new("multiple_strategies").with_message(
+            "Exactly one strategy must be specified, but multiple were given".into(),
+        )),
+    }
+}
+
+fn validate_blue_green_paths(req: &SaveSecretRequest) -> Result<(), ValidationError> {
+    if let Some(bg) = &req.strategy.blue_green
+        && bg.blue_path == bg.green_path
+    {
+        return Err(ValidationError::new("identical_paths")
+            .with_message("blue_path and green_path must be different".into()));
+    }
+
+    Ok(())
+}
+
 /// Request payload for creating a new secret entry.
 #[derive(Deserialize, ToSchema, Validate)]
-#[validate(schema(function = "validate_exactly_one_provider"))]
+#[validate(
+    schema(function = "validate_exactly_one_provider"),
+    schema(function = "validate_exactly_one_strategy"),
+    schema(function = "validate_blue_green_paths")
+)]
 pub(in crate::handlers) struct SaveSecretRequest {
-    /// Logical path used by the downstream scheduler/rotator services.
-    #[schema(example = "prod/payments/stripe_api_key", min_length = 1)]
-    #[validate(length(min = 1, max = 255))]
-    pub path: String,
-
     /// Cron expression defining the rotation schedule (7-field: sec min hour dom month dow year).
     #[schema(example = "0 0 * * * * *")]
     #[validate(length(min = 1, max = 255), custom(function = "validate_cron"))]
     pub cron_expression: String,
 
-    /// Optional AWS-specific configuration for cross-account role assumption.
+    /// Rotation strategy — exactly one must be provided.
     #[validate(nested)]
-    pub aws: Option<AwsConfigRequest>,
+    pub strategy: StrategyRequest,
+
+    /// Provider configuration — exactly one must be provided.
+    #[validate(nested)]
+    pub provider: ProviderRequest,
 }
 
 /// Response returned after successful secret creation.
@@ -81,7 +147,6 @@ pub(in crate::handlers) struct SaveSecretResponse {
     responses(
         (status = 201, description = "Secret created successfully", body = SaveSecretResponse),
         (status = 400, description = "Invalid request", body = ErrorResponse),
-        (status = 404, description = "Resource not found", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
@@ -97,13 +162,29 @@ pub(in crate::handlers) async fn save_secret(
         }
     }
 
+    let strategy = if let Some(s) = body.strategy.single {
+        StrategyConfig::Single(SingleStrategyConfig { path: s.path })
+    } else if let Some(bg) = body.strategy.blue_green {
+        StrategyConfig::BlueGreen(BlueGreenStrategyConfig {
+            blue_path: bg.blue_path,
+            green_path: bg.green_path,
+            active_slot: ActiveSlot::Blue,
+        })
+    } else {
+        unreachable!("strategy validated to have exactly one")
+    };
+
+    let provider = if let Some(aws) = body.provider.aws {
+        ProviderConfig::Aws(AwsProviderConfig {
+            role_arn: aws.role_arn,
+        })
+    } else {
+        unreachable!("provider validated to have exactly one")
+    };
+
     match state
         .secrets_service
-        .create_secret(
-            body.path,
-            body.cron_expression,
-            body.aws.map(|a| a.role_arn),
-        )
+        .create_secret(body.cron_expression, provider, strategy)
         .await
     {
         Ok(id) => (StatusCode::CREATED, Json(SaveSecretResponse { id })).into_response(),
@@ -120,11 +201,35 @@ pub(in crate::handlers) async fn save_secret(
     }
 }
 
-/// AWS configuration returned in secret responses.
+#[derive(Serialize, ToSchema)]
+pub(in crate::handlers) struct SingleStrategyResponse {
+    pub path: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(in crate::handlers) struct BlueGreenStrategyResponse {
+    pub blue_path: String,
+    pub green_path: String,
+    pub active_slot: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(in crate::handlers) struct StrategyResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub single: Option<SingleStrategyResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blue_green: Option<BlueGreenStrategyResponse>,
+}
+
 #[derive(Serialize, ToSchema)]
 pub(in crate::handlers) struct AwsConfigResponse {
-    #[schema(example = "arn:aws:iam::123456789012:role/SecretRotator")]
     pub role_arn: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(in crate::handlers) struct ProviderResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aws: Option<AwsConfigResponse>,
 }
 
 /// A single secret entry.
@@ -132,25 +237,44 @@ pub(in crate::handlers) struct AwsConfigResponse {
 pub(in crate::handlers) struct SecretResponse {
     #[schema(example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")]
     pub id: uuid::Uuid,
-    #[schema(example = "prod/payments/stripe_api_key")]
-    pub path: String,
-    pub aws: Option<AwsConfigResponse>,
+    pub strategy: StrategyResponse,
+    pub provider: ProviderResponse,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: Option<chrono::NaiveDateTime>,
 }
 
 impl From<interfaces::secrets::Secret> for SecretResponse {
     fn from(s: interfaces::secrets::Secret) -> Self {
-        let aws = s.provider.map(|p| match p {
-            interfaces::secrets::ProviderConfig::Aws(a) => AwsConfigResponse {
-                role_arn: a.role_arn,
+        let strategy = match s.strategy {
+            StrategyConfig::Single(single) => StrategyResponse {
+                single: Some(SingleStrategyResponse { path: single.path }),
+                blue_green: None,
             },
-        });
+            StrategyConfig::BlueGreen(bg) => StrategyResponse {
+                single: None,
+                blue_green: Some(BlueGreenStrategyResponse {
+                    blue_path: bg.blue_path,
+                    green_path: bg.green_path,
+                    active_slot: match bg.active_slot {
+                        ActiveSlot::Blue => "blue".to_string(),
+                        ActiveSlot::Green => "green".to_string(),
+                    },
+                }),
+            },
+        };
+
+        let provider = match s.provider {
+            ProviderConfig::Aws(aws) => ProviderResponse {
+                aws: Some(AwsConfigResponse {
+                    role_arn: aws.role_arn,
+                }),
+            },
+        };
 
         Self {
             id: s.id,
-            path: s.path,
-            aws,
+            strategy,
+            provider,
             created_at: s.created_at,
             updated_at: s.updated_at,
         }
@@ -260,33 +384,132 @@ pub(in crate::handlers) async fn get_secret_by_id(
     }
 }
 
+/// Response after activating a blue/green slot.
+#[derive(Serialize, ToSchema)]
+pub(in crate::handlers) struct ActivateBlueGreenResponse {
+    pub active_slot: String,
+}
+
+#[utoipa::path(
+    post,
+    operation_id = "activateBlueGreen",
+    tag = "secrets",
+    summary = "Activate blue/green slot",
+    description = "Flips the active slot for a blue_green strategy secret and publishes rotation.done.",
+    path = "/secrets/{id}/activate",
+    params(
+        ("id" = uuid::Uuid, Path, description = "The ID of the secret")
+    ),
+    responses(
+        (status = 200, description = "Slot activated successfully", body = ActivateBlueGreenResponse),
+        (status = 400, description = "Secret does not use blue_green strategy", body = ErrorResponse),
+        (status = 404, description = "Secret not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub(in crate::handlers) async fn activate_blue_green(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    match state.secrets_service.activate_blue_green(id).await {
+        Ok(new_slot) => {
+            let active_slot = match new_slot {
+                ActiveSlot::Blue => "blue".to_string(),
+                ActiveSlot::Green => "green".to_string(),
+            };
+            (
+                StatusCode::OK,
+                Json(ActivateBlueGreenResponse { active_slot }),
+            )
+                .into_response()
+        }
+        Err(ServiceError::NotFound) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                message: "Secret not found".to_string(),
+            }),
+        )
+            .into_response(),
+        Err(ServiceError::InvalidOperation(msg)) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { message: msg }),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(error = ?e, "Unexpected error in activate_blue_green");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    message: "Internal server error".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use validator::Validate;
 
-    fn valid_base(aws: Option<AwsConfigRequest>) -> SaveSecretRequest {
-        SaveSecretRequest {
-            path: "prod/payments/key".to_string(),
-            cron_expression: "0 0 * * * * *".to_string(),
-            aws,
+    fn single_strategy() -> StrategyRequest {
+        StrategyRequest {
+            single: Some(SingleStrategyRequest {
+                path: "prod/payments/key".to_string(),
+            }),
+            blue_green: None,
         }
     }
 
-    fn aws() -> AwsConfigRequest {
-        AwsConfigRequest {
-            role_arn: "arn:aws:iam::123456789012:role/Rotator".to_string(),
+    fn blue_green_strategy() -> StrategyRequest {
+        StrategyRequest {
+            single: None,
+            blue_green: Some(BlueGreenStrategyRequest {
+                blue_path: "prod/key-blue".to_string(),
+                green_path: "prod/key-green".to_string(),
+            }),
+        }
+    }
+
+    fn aws_provider() -> ProviderRequest {
+        ProviderRequest {
+            aws: Some(AwsConfigRequest {
+                role_arn: "arn:aws:iam::123456789012:role/Rotator".to_string(),
+            }),
+        }
+    }
+
+    fn valid_base(strategy: StrategyRequest, provider: ProviderRequest) -> SaveSecretRequest {
+        SaveSecretRequest {
+            cron_expression: "0 0 * * * * *".to_string(),
+            strategy,
+            provider,
         }
     }
 
     #[test]
-    fn valid_with_aws() {
-        assert!(valid_base(Some(aws())).validate().is_ok());
+    fn valid_single_with_aws() {
+        assert!(
+            valid_base(single_strategy(), aws_provider())
+                .validate()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn valid_blue_green_with_aws() {
+        assert!(
+            valid_base(blue_green_strategy(), aws_provider())
+                .validate()
+                .is_ok()
+        );
     }
 
     #[test]
     fn missing_provider_rejected() {
-        let err = valid_base(None).validate().unwrap_err();
+        let req = valid_base(single_strategy(), ProviderRequest { aws: None });
+        let err = req.validate().unwrap_err();
         let codes: Vec<_> = err
             .field_errors()
             .get("__all__")
@@ -298,22 +521,79 @@ mod tests {
     }
 
     #[test]
-    fn empty_path_rejected() {
-        let req = SaveSecretRequest {
-            path: "".to_string(),
-            cron_expression: "0 0 * * * * *".to_string(),
-            aws: Some(aws()),
-        };
+    fn missing_strategy_rejected() {
+        let req = valid_base(
+            StrategyRequest {
+                single: None,
+                blue_green: None,
+            },
+            aws_provider(),
+        );
         let err = req.validate().unwrap_err();
-        assert!(err.field_errors().contains_key("path"));
+        let codes: Vec<_> = err
+            .field_errors()
+            .get("__all__")
+            .unwrap()
+            .iter()
+            .map(|e| e.code.as_ref())
+            .collect();
+        assert!(codes.contains(&"missing_strategy"), "got: {:?}", codes);
+    }
+
+    #[test]
+    fn both_strategies_rejected() {
+        let req = valid_base(
+            StrategyRequest {
+                single: Some(SingleStrategyRequest {
+                    path: "a".to_string(),
+                }),
+                blue_green: Some(BlueGreenStrategyRequest {
+                    blue_path: "b".to_string(),
+                    green_path: "c".to_string(),
+                }),
+            },
+            aws_provider(),
+        );
+        let err = req.validate().unwrap_err();
+        let codes: Vec<_> = err
+            .field_errors()
+            .get("__all__")
+            .unwrap()
+            .iter()
+            .map(|e| e.code.as_ref())
+            .collect();
+        assert!(codes.contains(&"multiple_strategies"), "got: {:?}", codes);
+    }
+
+    #[test]
+    fn identical_blue_green_paths_rejected() {
+        let req = valid_base(
+            StrategyRequest {
+                single: None,
+                blue_green: Some(BlueGreenStrategyRequest {
+                    blue_path: "prod/same".to_string(),
+                    green_path: "prod/same".to_string(),
+                }),
+            },
+            aws_provider(),
+        );
+        let err = req.validate().unwrap_err();
+        let codes: Vec<_> = err
+            .field_errors()
+            .get("__all__")
+            .unwrap()
+            .iter()
+            .map(|e| e.code.as_ref())
+            .collect();
+        assert!(codes.contains(&"identical_paths"), "got: {:?}", codes);
     }
 
     #[test]
     fn invalid_cron_rejected() {
         let req = SaveSecretRequest {
-            path: "prod/key".to_string(),
             cron_expression: "not-a-cron".to_string(),
-            aws: Some(aws()),
+            strategy: single_strategy(),
+            provider: aws_provider(),
         };
         let err = req.validate().unwrap_err();
         assert!(err.field_errors().contains_key("cron_expression"));
@@ -321,14 +601,28 @@ mod tests {
 
     #[test]
     fn short_role_arn_rejected() {
-        let req = valid_base(Some(AwsConfigRequest {
-            role_arn: "short".to_string(),
-        }));
+        let req = valid_base(
+            single_strategy(),
+            ProviderRequest {
+                aws: Some(AwsConfigRequest {
+                    role_arn: "short".to_string(),
+                }),
+            },
+        );
         let err = req.validate().unwrap_err();
-        let aws_errors = err.errors().get("aws").expect("expected aws errors");
+        let aws_errors = err
+            .errors()
+            .get("provider")
+            .expect("expected provider errors");
         match aws_errors {
             validator::ValidationErrorsKind::Struct(inner) => {
-                assert!(inner.field_errors().contains_key("role_arn"))
+                let aws_inner = inner.errors().get("aws").expect("expected aws errors");
+                match aws_inner {
+                    validator::ValidationErrorsKind::Struct(aws_struct) => {
+                        assert!(aws_struct.field_errors().contains_key("role_arn"))
+                    }
+                    other => panic!("expected Struct errors, got: {:?}", other),
+                }
             }
             other => panic!("expected Struct errors, got: {:?}", other),
         }

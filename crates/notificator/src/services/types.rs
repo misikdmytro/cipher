@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -22,4 +23,6 @@ pub struct WebhookPayload {
     pub secret_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }

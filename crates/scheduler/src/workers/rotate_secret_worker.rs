@@ -10,12 +10,13 @@ use thiserror::Error;
 use tracing::{error, info, warn};
 
 use crate::jobs::rotate_secret::RotateSecretJob;
-use crate::services::publisher::{PublishError, RotationPublisher};
+use common::amqp::PublishError;
+use common::rotation_publisher::RotationEventPublisher;
 
 #[derive(Clone)]
 pub struct RotateSecretsState {
     pub storage: PostgresStorage<RotateSecretJob>,
-    pub publisher: Arc<dyn RotationPublisher>,
+    pub publisher: Arc<dyn RotationEventPublisher>,
 }
 
 #[derive(Debug, Error)]
@@ -39,7 +40,7 @@ pub async fn handle_rotate_secret(
 ) -> Result<(), RotateSecretError> {
     info!(secret_id = %job.secret_id, "Executing secret rotation");
 
-    state.publisher.publish(job.secret_id).await?;
+    state.publisher.publish_scheduled(job.secret_id).await?;
 
     match reschedule(job, &state).await {
         Ok(_) => Ok(()),

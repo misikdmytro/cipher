@@ -11,7 +11,6 @@ use scheduler::{
     config::AppConfig,
     grpc::scheduler::new_scheduler_service,
     jobs::rotate_secret::RotateSecretJob,
-    services::publisher::new_rotation_publisher,
     workers::rotate_secret_worker::{RotateSecretsState, handle_rotate_secret},
 };
 
@@ -36,7 +35,9 @@ async fn main() -> Result<()> {
     let amqp = common::amqp::connect(&config.rabbitmq).await?;
     let publish_channel = amqp.create_publish_channel().await?;
 
-    let publisher = Arc::new(new_rotation_publisher(publish_channel));
+    let publisher = Arc::new(common::rotation_publisher::new_rotation_event_publisher(
+        publish_channel,
+    ));
 
     let addr = config.grpc.bind_address().parse()?;
     let scheduler = SchedulerServiceServer::new(new_scheduler_service(storage.clone()));

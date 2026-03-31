@@ -28,6 +28,7 @@ async fn delivers_to_all_matching_webhooks() {
         event_type: "rotation.done".to_string(),
         secret_id,
         error: None,
+        details: None,
     };
 
     let result = process_event(&repo, &delivery, &payload).await;
@@ -53,6 +54,7 @@ async fn no_delivery_when_no_webhooks_registered() {
         event_type: "rotation.started".to_string(),
         secret_id,
         error: None,
+        details: None,
     };
 
     let result = process_event(&repo, &delivery, &payload).await;
@@ -74,6 +76,7 @@ async fn delivery_failure_does_not_block_other_webhooks() {
         event_type: "rotation.done".to_string(),
         secret_id,
         error: None,
+        details: None,
     };
 
     let result = process_event(&repo, &delivery, &payload).await;
@@ -101,6 +104,7 @@ async fn only_delivers_to_webhooks_for_matching_secret() {
         event_type: "rotation.done".to_string(),
         secret_id: target_id,
         error: None,
+        details: None,
     };
 
     let result = process_event(&repo, &delivery, &payload).await;
@@ -124,6 +128,7 @@ async fn payload_contains_correct_event_type_and_secret_id() {
         event_type: "rotation.started".to_string(),
         secret_id,
         error: None,
+        details: None,
     };
 
     process_event(&repo, &delivery, &payload).await.unwrap();
@@ -147,6 +152,7 @@ async fn failed_event_includes_error_in_payload() {
         event_type: "rotation.failed".to_string(),
         secret_id,
         error: Some("access denied".to_string()),
+        details: None,
     };
 
     process_event(&repo, &delivery, &payload).await.unwrap();

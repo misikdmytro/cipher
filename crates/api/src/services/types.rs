@@ -8,6 +8,9 @@ pub enum ServiceError {
     #[error("not found")]
     NotFound,
 
+    #[error("invalid operation: {0}")]
+    InvalidOperation(String),
+
     #[error("other error: {0}")]
     Other(String),
 }

@@ -28,8 +28,14 @@ async fn main() -> Result<()> {
     let notificator_channel = Endpoint::new(config.notificator.address())?.connect_lazy();
     let notificator_client = NotificatorServiceClient::new(notificator_channel);
 
+    let amqp = common::amqp::connect(&config.rabbitmq).await?;
+    let publish_channel = amqp.create_publish_channel().await?;
+
     let repository = new_secrets_repository(&config).await?;
-    let secrets_service = new_secrets_service(Box::new(repository), scheduler_client);
+    let publisher = Box::new(common::rotation_publisher::new_rotation_event_publisher(
+        publish_channel,
+    ));
+    let secrets_service = new_secrets_service(Box::new(repository), scheduler_client, publisher);
     let webhooks_service = new_webhooks_service(notificator_client);
 
     let state = Arc::new(AppState {

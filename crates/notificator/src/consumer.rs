@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use common::consumer::{self, ConsumerConfig};
 use futures::future::join_all;
-use interfaces::events::rotation::{RotationDone, RotationFailed, RotationStarted};
+use interfaces::events::rotation::{RotationDone, RotationFailed, RotationReady, RotationStarted};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -21,6 +21,7 @@ pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> Result<
         routing_keys: vec![
             "rotation.started".to_string(),
             "rotation.done".to_string(),
+            "rotation.ready".to_string(),
             "rotation.failed".to_string(),
         ],
         dead_letter_exchange: Some("rotation.dlx".to_string()),
@@ -126,14 +127,33 @@ fn parse_event(routing_key: &str, data: &[u8]) -> Result<WebhookPayload> {
                 event_type: "rotation.started".to_string(),
                 secret_id: event.secret_id,
                 error: None,
+                details: None,
             })
         }
         "rotation.done" => {
             let event: RotationDone = serde_json::from_slice(data)?;
+            let details = serde_json::to_value(&event.details)?;
             Ok(WebhookPayload {
                 event_type: "rotation.done".to_string(),
                 secret_id: event.secret_id,
                 error: None,
+                details: Some(details),
+            })
+        }
+        "rotation.ready" => {
+            let event: RotationReady = serde_json::from_slice(data)?;
+            let details = serde_json::json!({
+                "type": "blue_green",
+                "active_slot": event.active_slot,
+                "active_path": event.active_path,
+                "ready_slot": event.ready_slot,
+                "ready_path": event.ready_path,
+            });
+            Ok(WebhookPayload {
+                event_type: "rotation.ready".to_string(),
+                secret_id: event.secret_id,
+                error: None,
+                details: Some(details),
             })
         }
         "rotation.failed" => {
@@ -142,6 +162,7 @@ fn parse_event(routing_key: &str, data: &[u8]) -> Result<WebhookPayload> {
                 event_type: "rotation.failed".to_string(),
                 secret_id: event.secret_id,
                 error: Some(event.error),
+                details: None,
             })
         }
         _ => anyhow::bail!("unknown routing key: {}", routing_key),

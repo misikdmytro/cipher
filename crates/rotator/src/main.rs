@@ -6,6 +6,8 @@ use common::rotation_publisher::new_rotation_event_publisher;
 use proto::api::api_service_client::ApiServiceClient;
 use rotator::config::AppConfig;
 use rotator::consumer;
+use rotator::grpc;
+use rotator::grpc::rotator_service::new_rotator_grpc_service;
 use rotator::helpers::aws::DefaultAwsSecretsClientFactory;
 use rotator::helpers::generator::RandomHexGenerator;
 use rotator::services::rotation::new_rotation_service;
@@ -44,10 +46,14 @@ async fn main() -> Result<()> {
         amqp_channel: consume_channel,
     });
 
+    let grpc_address = config.grpc.bind_address();
     let health_address = config.health.bind_address();
+
+    let grpc_svc = new_rotator_grpc_service(state.clone());
 
     tokio::select! {
         result = consumer::serve(state, shutdown.clone()) => result?,
+        result = grpc::serve(grpc_svc, &grpc_address, shutdown.clone()) => result?,
         result = common::health::serve_health(&health_address, shutdown.clone()) => result?,
     }
 

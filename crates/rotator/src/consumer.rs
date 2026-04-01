@@ -65,7 +65,7 @@ async fn handle_delivery(state: &AppState, delivery: &lapin::message::Delivery) 
     }
 
     match state.rotation_service.rotate(secret_id).await {
-        Ok(()) => {
+        Ok(_) => {
             consumer::ack(delivery).await;
         }
         Err(ServiceError::NotFound) => {
@@ -104,7 +104,7 @@ pub async fn process_rotation(
         .map_err(ProcessError::Publish)?;
 
     match rotation_service.rotate(secret_id).await {
-        Ok(()) => Ok(()),
+        Ok(_) => Ok(()),
         Err(ServiceError::NotFound) => {
             if let Err(e) = publisher
                 .publish_failed(secret_id, "secret not found".to_string())

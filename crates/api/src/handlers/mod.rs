@@ -1,4 +1,5 @@
 mod common;
+mod models;
 mod secrets;
 mod webhooks;
 
@@ -40,6 +41,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .routes(routes!(secrets::save_secret, secrets::list_secrets))
         .routes(routes!(secrets::get_secret_by_id))
         .routes(routes!(secrets::activate_blue_green))
+        .routes(routes!(secrets::rotate_secret))
         .routes(routes!(webhooks::register_webhook))
         .with_state(state)
         .split_for_parts();

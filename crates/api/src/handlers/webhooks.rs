@@ -4,30 +4,14 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::{handlers::common::ErrorResponse, state::AppState};
-
-/// Request payload for registering a webhook.
-#[derive(Deserialize, ToSchema, Validate)]
-pub(in crate::handlers) struct RegisterWebhookRequest {
-    /// The URL to call when a rotation event occurs for this secret.
-    #[schema(example = "https://example.com/webhook")]
-    #[validate(url)]
-    #[validate(length(min = 1, max = 2048))]
-    pub url: String,
-}
-
-/// Response returned after successful webhook registration.
-#[derive(Serialize, ToSchema)]
-pub(in crate::handlers) struct RegisterWebhookResponse {
-    /// The ID of the created webhook.
-    #[schema(example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")]
-    pub id: uuid::Uuid,
-}
+use crate::{
+    handlers::common::ErrorResponse,
+    handlers::models::webhooks::{RegisterWebhookRequest, RegisterWebhookResponse},
+    state::AppState,
+};
 
 #[utoipa::path(
     post,

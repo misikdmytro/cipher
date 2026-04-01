@@ -28,3 +28,8 @@ port = 50051
 scheme = "http"
 host = "[::1]"
 port = 50053
+
+[rotator]
+scheme = "http"
+host = "[::1]"
+port = 50054

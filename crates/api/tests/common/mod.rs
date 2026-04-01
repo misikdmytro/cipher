@@ -11,7 +11,7 @@ use api::services::webhooks::new_webhooks_service;
 use api::state::AppState;
 use common::rotation_publisher::RotationEventPublisher;
 use interfaces::events::rotation::RotationDoneDetails;
-use mocks::{MockNotificatorService, MockSchedulerService};
+use mocks::{MockNotificatorService, MockRotationTriggerService, MockSchedulerService};
 use proto::api::api_service_client::ApiServiceClient;
 use proto::api::api_service_server::ApiServiceServer;
 use proto::notificator::notificator_service_server::NotificatorServiceServer;
@@ -31,14 +31,29 @@ pub struct TestApp {
 
 impl TestApp {
     pub async fn spawn() -> Self {
-        Self::build(MockSchedulerService::success()).await
+        Self::build(
+            MockSchedulerService::success(),
+            MockRotationTriggerService::success_single("mock/path"),
+        )
+        .await
     }
 
     pub async fn spawn_with_failing_scheduler() -> Self {
-        Self::build(MockSchedulerService::failing()).await
+        Self::build(
+            MockSchedulerService::failing(),
+            MockRotationTriggerService::success_single("mock/path"),
+        )
+        .await
     }
 
-    async fn build(scheduler_mock: MockSchedulerService) -> Self {
+    pub async fn spawn_with_rotation(rotation_mock: MockRotationTriggerService) -> Self {
+        Self::build(MockSchedulerService::success(), rotation_mock).await
+    }
+
+    async fn build(
+        scheduler_mock: MockSchedulerService,
+        rotation_mock: MockRotationTriggerService,
+    ) -> Self {
         let mock = Arc::new(scheduler_mock);
         let notificator_mock = Arc::new(MockNotificatorService::success());
 
@@ -82,6 +97,7 @@ impl TestApp {
                 port: notificator_port,
                 ..Default::default()
             },
+            rotator: Default::default(),
         };
 
         let repository = new_secrets_repository(&config)
@@ -118,6 +134,7 @@ impl TestApp {
             config,
             secrets_service: Box::new(secrets_service),
             webhooks_service: Box::new(webhooks_service),
+            rotation_service: Box::new(rotation_mock),
         });
 
         // Start API gRPC server

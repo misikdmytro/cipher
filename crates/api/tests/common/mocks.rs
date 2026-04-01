@@ -1,5 +1,7 @@
 use std::sync::Mutex;
 
+use api::services::rotation::{RotationOutcome, RotationTriggerService};
+use api::services::types::{ServiceError, ServiceResult};
 use proto::notificator::{
     RegisterWebhookRequest, RegisterWebhookResponse, notificator_service_server::NotificatorService,
 };
@@ -89,5 +91,70 @@ impl NotificatorService for MockNotificatorService {
         Ok(tonic::Response::new(RegisterWebhookResponse {
             webhook_id: Uuid::new_v4().to_string(),
         }))
+    }
+}
+
+pub struct MockRotationTriggerService {
+    result: Mutex<Option<ServiceResult<RotationOutcome>>>,
+    received: Mutex<Vec<Uuid>>,
+}
+
+impl MockRotationTriggerService {
+    pub fn success_single(path: &str) -> Self {
+        Self {
+            result: Mutex::new(Some(Ok(RotationOutcome::Single {
+                path: path.to_string(),
+            }))),
+            received: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn success_blue_green(
+        active_slot: &str,
+        active_path: &str,
+        ready_slot: &str,
+        ready_path: &str,
+    ) -> Self {
+        Self {
+            result: Mutex::new(Some(Ok(RotationOutcome::BlueGreen {
+                active_slot: active_slot.to_string(),
+                active_path: active_path.to_string(),
+                ready_slot: ready_slot.to_string(),
+                ready_path: ready_path.to_string(),
+            }))),
+            received: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn not_found() -> Self {
+        Self {
+            result: Mutex::new(Some(Err(ServiceError::NotFound))),
+            received: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn failing() -> Self {
+        Self {
+            result: Mutex::new(Some(Err(ServiceError::Other(
+                "rotation failed".to_string(),
+            )))),
+            received: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn received_requests(&self) -> Vec<Uuid> {
+        self.received.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl RotationTriggerService for MockRotationTriggerService {
+    async fn rotate_secret(&self, secret_id: Uuid) -> ServiceResult<RotationOutcome> {
+        self.received.lock().unwrap().push(secret_id);
+        self.result
+            .lock()
+            .unwrap()
+            .take()
+            .expect("MockRotationTriggerService: no result configured")
     }
 }

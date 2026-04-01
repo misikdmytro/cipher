@@ -13,3 +13,16 @@ pub enum ServiceError {
 }
 
 pub type ServiceResult<T> = Result<T, ServiceError>;
+
+#[derive(Debug, Clone)]
+pub enum RotationResult {
+    Single {
+        path: String,
+    },
+    BlueGreen {
+        active_slot: String,
+        active_path: String,
+        ready_slot: String,
+        ready_path: String,
+    },
+}

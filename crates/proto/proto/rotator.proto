@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package rotator;
+
+// Request to trigger a manual rotation for a secret.
+message RotateSecretRequest {
+  string secret_id = 1;
+}
+
+// Result of a single-path rotation.
+message SingleRotationResult {
+  // The secret path that was rotated.
+  string path = 1;
+}
+
+// Result of a blue-green rotation.
+message BlueGreenRotationResult {
+  // Currently active slot: "blue" or "green".
+  string active_slot = 1;
+  // Path of the currently active secret.
+  string active_path = 2;
+  // Slot that received the new secret value: "blue" or "green".
+  string ready_slot  = 3;
+  // Path of the newly rotated secret.
+  string ready_path  = 4;
+}
+
+// Response returned after a successful rotation.
+message RotateSecretResponse {
+  // The rotation result, depending on the strategy used.
+  oneof result {
+    SingleRotationResult    single     = 1;
+    BlueGreenRotationResult blue_green = 2;
+  }
+}
+
+// gRPC service exposed by the Rotator for manual rotation triggers.
+service RotatorService {
+  // Executes a synchronous rotation for the given secret.
+  rpc RotateSecret(RotateSecretRequest) returns (RotateSecretResponse);
+}

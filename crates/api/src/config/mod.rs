@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub api: HostingConfig,
     pub grpc: HostingConfig,
     pub notificator: HostingConfig,
+    pub rotator: HostingConfig,
 }
 
 impl AppConfig {

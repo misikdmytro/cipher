@@ -5,18 +5,20 @@ use std::sync::Mutex;
 use common::mocks::MockRotationEventPublisher;
 use rotator::consumer::{ProcessError, process_rotation};
 use rotator::services::rotation::RotationService;
-use rotator::services::types::{ServiceError, ServiceResult};
+use rotator::services::types::{RotationResult, ServiceError, ServiceResult};
 use uuid::Uuid;
 
 struct MockRotationService {
-    result: Mutex<Option<ServiceResult<()>>>,
+    result: Mutex<Option<ServiceResult<RotationResult>>>,
     calls: Mutex<Vec<Uuid>>,
 }
 
 impl MockRotationService {
     fn success() -> Self {
         Self {
-            result: Mutex::new(Some(Ok(()))),
+            result: Mutex::new(Some(Ok(RotationResult::Single {
+                path: "mock/path".to_string(),
+            }))),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -42,7 +44,7 @@ impl MockRotationService {
 
 #[async_trait::async_trait]
 impl RotationService for MockRotationService {
-    async fn rotate(&self, secret_id: Uuid) -> ServiceResult<()> {
+    async fn rotate(&self, secret_id: Uuid) -> ServiceResult<RotationResult> {
         self.calls.lock().unwrap().push(secret_id);
         self.result
             .lock()

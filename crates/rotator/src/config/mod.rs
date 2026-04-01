@@ -6,6 +6,7 @@ pub struct AppConfig {
     pub log: LogConfig,
     pub rabbitmq: RabbitMqConfig,
     pub api: HostingConfig,
+    pub grpc: HostingConfig,
     pub health: HostingConfig,
 }
 

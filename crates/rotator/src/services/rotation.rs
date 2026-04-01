@@ -8,11 +8,11 @@ use uuid::Uuid;
 
 use crate::helpers::aws::{AwsSecretError, AwsSecretsClientFactory};
 use crate::helpers::generator::SecretGenerator;
-use crate::services::types::{ServiceError, ServiceResult};
+use crate::services::types::{RotationResult, ServiceError, ServiceResult};
 
 #[async_trait::async_trait]
 pub trait RotationService: Send + Sync {
-    async fn rotate(&self, secret_id: Uuid) -> ServiceResult<()>;
+    async fn rotate(&self, secret_id: Uuid) -> ServiceResult<RotationResult>;
 }
 
 struct RotationServiceImpl {
@@ -38,7 +38,7 @@ pub fn new_rotation_service(
 
 #[async_trait::async_trait]
 impl RotationService for RotationServiceImpl {
-    async fn rotate(&self, secret_id: Uuid) -> ServiceResult<()> {
+    async fn rotate(&self, secret_id: Uuid) -> ServiceResult<RotationResult> {
         let mut api_client = self.api_client.clone();
 
         let response = api_client
@@ -90,6 +90,10 @@ impl RotationService for RotationServiceImpl {
                 {
                     error!(error = ?e, "Failed to publish rotation.done for single strategy");
                 }
+
+                Ok(RotationResult::Single {
+                    path: s.path.clone(),
+                })
             }
             Strategy::BlueGreen(bg) => {
                 let (inactive_slot, inactive_path, active_slot, active_path) =
@@ -111,18 +115,23 @@ impl RotationService for RotationServiceImpl {
                     .publish_ready(
                         secret_id,
                         active_slot.to_string(),
-                        active_path,
+                        active_path.clone(),
                         inactive_slot.to_string(),
-                        inactive_path,
+                        inactive_path.clone(),
                     )
                     .await
                 {
                     error!(error = ?e, "Failed to publish rotation.ready for blue_green strategy");
                 }
+
+                Ok(RotationResult::BlueGreen {
+                    active_slot: active_slot.to_string(),
+                    active_path,
+                    ready_slot: inactive_slot.to_string(),
+                    ready_path: inactive_path,
+                })
             }
         }
-
-        Ok(())
     }
 }
 

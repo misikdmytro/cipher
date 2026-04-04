@@ -9,7 +9,7 @@ use rotator::consumer;
 use rotator::grpc;
 use rotator::grpc::rotator_service::new_rotator_grpc_service;
 use rotator::helpers::aws::DefaultAwsSecretsClientFactory;
-use rotator::helpers::generator::RandomHexGenerator;
+use rotator::helpers::generator::RandomPasswordGenerator;
 use rotator::services::rotation::new_rotation_service;
 use rotator::state::AppState;
 use tonic::transport::Endpoint;
@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     let aws_cfg = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let aws_factory = Box::new(DefaultAwsSecretsClientFactory::new(aws_cfg));
 
-    let secret_generator = Box::new(RandomHexGenerator::new(32));
+    let secret_generator = Box::new(RandomPasswordGenerator::new(48));
 
     let amqp = common::amqp::connect(&config.rabbitmq).await?;
     let publish_channel = amqp.create_publish_channel().await?;

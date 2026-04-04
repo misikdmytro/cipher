@@ -9,6 +9,12 @@ port = 5432
 database = "api"
 use_ssl = false
 
+[rabbitmq]
+host = "localhost"
+port = 5672
+username = "cipher"
+password = "cipher"
+
 [scheduler]
 scheme = "http"
 host = "[::1]"

@@ -19,3 +19,13 @@ pub struct RegisterWebhookResponse {
     #[schema(example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")]
     pub id: uuid::Uuid,
 }
+
+/// A single webhook entry.
+#[derive(Serialize, ToSchema)]
+pub struct WebhookResponse {
+    #[schema(example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")]
+    pub id: uuid::Uuid,
+    #[schema(example = "https://example.com/webhook")]
+    pub url: String,
+    pub created_at: chrono::NaiveDateTime,
+}

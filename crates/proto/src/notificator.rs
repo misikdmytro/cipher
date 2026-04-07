@@ -16,6 +16,45 @@ pub struct RegisterWebhookResponse {
     #[prost(string, tag = "1")]
     pub webhook_id: ::prost::alloc::string::String,
 }
+/// A single webhook entry returned by list operations
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WebhookEntry {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub secret_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub url: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub created_at: ::prost::alloc::string::String,
+}
+/// Request message for listing webhooks for a secret
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListWebhooksRequest {
+    #[prost(string, tag = "1")]
+    pub secret_id: ::prost::alloc::string::String,
+    #[prost(int64, tag = "2")]
+    pub limit: i64,
+    #[prost(int64, tag = "3")]
+    pub offset: i64,
+}
+/// Response message containing the list of webhooks
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListWebhooksResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub webhooks: ::prost::alloc::vec::Vec<WebhookEntry>,
+    #[prost(int64, tag = "2")]
+    pub total: i64,
+}
+/// Request message for deleting a webhook
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteWebhookRequest {
+    #[prost(string, tag = "1")]
+    pub webhook_id: ::prost::alloc::string::String,
+}
+/// Response message for webhook deletion
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteWebhookResponse {}
 /// Generated client implementations.
 pub mod notificator_service_client {
     #![allow(
@@ -135,6 +174,60 @@ pub mod notificator_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /// ListWebhooks returns all webhooks registered for a given secret
+        pub async fn list_webhooks(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListWebhooksRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListWebhooksResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/notificator.NotificatorService/ListWebhooks",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("notificator.NotificatorService", "ListWebhooks"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// DeleteWebhook removes a webhook by its ID
+        pub async fn delete_webhook(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DeleteWebhookRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DeleteWebhookResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/notificator.NotificatorService/DeleteWebhook",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("notificator.NotificatorService", "DeleteWebhook"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -156,6 +249,22 @@ pub mod notificator_service_server {
             request: tonic::Request<super::RegisterWebhookRequest>,
         ) -> std::result::Result<
             tonic::Response<super::RegisterWebhookResponse>,
+            tonic::Status,
+        >;
+        /// ListWebhooks returns all webhooks registered for a given secret
+        async fn list_webhooks(
+            &self,
+            request: tonic::Request<super::ListWebhooksRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListWebhooksResponse>,
+            tonic::Status,
+        >;
+        /// DeleteWebhook removes a webhook by its ID
+        async fn delete_webhook(
+            &self,
+            request: tonic::Request<super::DeleteWebhookRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DeleteWebhookResponse>,
             tonic::Status,
         >;
     }
@@ -267,6 +376,98 @@ pub mod notificator_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = RegisterWebhookSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/notificator.NotificatorService/ListWebhooks" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListWebhooksSvc<T: NotificatorService>(pub Arc<T>);
+                    impl<
+                        T: NotificatorService,
+                    > tonic::server::UnaryService<super::ListWebhooksRequest>
+                    for ListWebhooksSvc<T> {
+                        type Response = super::ListWebhooksResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListWebhooksRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NotificatorService>::list_webhooks(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListWebhooksSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/notificator.NotificatorService/DeleteWebhook" => {
+                    #[allow(non_camel_case_types)]
+                    struct DeleteWebhookSvc<T: NotificatorService>(pub Arc<T>);
+                    impl<
+                        T: NotificatorService,
+                    > tonic::server::UnaryService<super::DeleteWebhookRequest>
+                    for DeleteWebhookSvc<T> {
+                        type Response = super::DeleteWebhookResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::DeleteWebhookRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NotificatorService>::delete_webhook(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = DeleteWebhookSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

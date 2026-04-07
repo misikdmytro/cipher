@@ -13,10 +13,12 @@ use validator::Validate;
 
 use crate::{
     handlers::common::ErrorResponse,
+    handlers::models::pagination::PaginatedResponse,
+    handlers::models::pagination::PaginationParams,
     handlers::models::secrets::{
-        ActivateBlueGreenResponse, BlueGreenRotationResponse, ListSecretsParams,
-        ListSecretsResponse, RotateSecretResponse, RotationDetailsResponse, RotationStatus,
-        SaveSecretRequest, SaveSecretResponse, SecretResponse, SingleRotationResponse,
+        ActivateBlueGreenResponse, BlueGreenRotationResponse, ProviderRequest,
+        RotateSecretResponse, RotationDetailsResponse, RotationStatus, SaveSecretRequest,
+        SaveSecretResponse, SecretResponse, SingleRotationResponse, StrategyRequest,
     },
     services::{rotation::RotationOutcome, types::ServiceError},
     state::AppState,
@@ -48,24 +50,19 @@ pub(in crate::handlers) async fn save_secret(
         }
     }
 
-    let strategy = if let Some(s) = body.strategy.single {
-        StrategyConfig::Single(SingleStrategyConfig { path: s.path })
-    } else if let Some(bg) = body.strategy.blue_green {
-        StrategyConfig::BlueGreen(BlueGreenStrategyConfig {
+    let strategy = match body.strategy {
+        StrategyRequest::Single(s) => StrategyConfig::Single(SingleStrategyConfig { path: s.path }),
+        StrategyRequest::BlueGreen(bg) => StrategyConfig::BlueGreen(BlueGreenStrategyConfig {
             blue_path: bg.blue_path,
             green_path: bg.green_path,
             active_slot: ActiveSlot::Blue,
-        })
-    } else {
-        unreachable!("strategy validated to have exactly one")
+        }),
     };
 
-    let provider = if let Some(aws) = body.provider.aws {
-        ProviderConfig::Aws(AwsProviderConfig {
+    let provider = match body.provider {
+        ProviderRequest::Aws(aws) => ProviderConfig::Aws(AwsProviderConfig {
             role_arn: aws.role_arn,
-        })
-    } else {
-        unreachable!("provider validated to have exactly one")
+        }),
     };
 
     match state
@@ -95,28 +92,30 @@ pub(in crate::handlers) async fn save_secret(
     description = "Returns a paginated list of registered secrets.",
     path = "/secrets",
     params(
-        ("limit" = Option<i64>, Query, description = "Maximum number of results to return (default 20, max 100)"),
-        ("offset" = Option<i64>, Query, description = "Number of results to skip (default 0)")
+        ("limit" = Option<u64>, Query, description = "Maximum number of results to return (default 20, max 100)"),
+        ("offset" = Option<u64>, Query, description = "Number of results to skip (default 0)")
     ),
     responses(
-        (status = 200, description = "Secrets retrieved successfully", body = ListSecretsResponse),
+        (status = 200, description = "Secrets retrieved successfully", body = inline(PaginatedResponse<SecretResponse>)),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 pub(in crate::handlers) async fn list_secrets(
     State(state): State<Arc<AppState>>,
-    Query(params): Query<ListSecretsParams>,
+    Query(params): Query<PaginationParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
-    let offset = params.offset.unwrap_or(0).max(0);
+    let offset = params.offset.unwrap_or(0);
 
-    match state.secrets_service.list_secrets(limit, offset).await {
+    match state
+        .secrets_service
+        .list_secrets(limit as i64, offset as i64)
+        .await
+    {
         Ok(page) => {
-            let response = ListSecretsResponse {
+            let response = PaginatedResponse {
                 items: page.items.into_iter().map(SecretResponse::from).collect(),
-                total: page.total,
-                limit,
-                offset,
+                total: page.total as u64,
             };
             (StatusCode::OK, Json(response)).into_response()
         }
@@ -268,10 +267,7 @@ pub(in crate::handlers) async fn rotate_secret(
             let (status, details) = match outcome {
                 RotationOutcome::Single { path } => (
                     RotationStatus::Done,
-                    RotationDetailsResponse {
-                        single: Some(SingleRotationResponse { path }),
-                        blue_green: None,
-                    },
+                    RotationDetailsResponse::Single(SingleRotationResponse { path }),
                 ),
                 RotationOutcome::BlueGreen {
                     active_slot,
@@ -280,15 +276,12 @@ pub(in crate::handlers) async fn rotate_secret(
                     ready_path,
                 } => (
                     RotationStatus::Ready,
-                    RotationDetailsResponse {
-                        single: None,
-                        blue_green: Some(BlueGreenRotationResponse {
-                            active_slot,
-                            active_path,
-                            ready_slot,
-                            ready_path,
-                        }),
-                    },
+                    RotationDetailsResponse::BlueGreen(BlueGreenRotationResponse {
+                        active_slot,
+                        active_path,
+                        ready_slot,
+                        ready_path,
+                    }),
                 ),
             };
             (

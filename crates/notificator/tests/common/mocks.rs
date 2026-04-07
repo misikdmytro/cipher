@@ -2,7 +2,8 @@ use std::sync::Mutex;
 
 use notificator::repositories::models::webhooks::Webhook;
 use notificator::repositories::webhooks::{
-    AddWebhookError, AddWebhookRequest, GetWebhooksError, WebhooksRepository,
+    AddWebhookError, AddWebhookRequest, DeleteWebhookError, GetWebhooksError, ListWebhooksRequest,
+    WebhooksPage, WebhooksRepository,
 };
 use notificator::services::types::WebhookPayload;
 use notificator::services::webhook_delivery::DeliveryError;
@@ -53,6 +54,34 @@ impl WebhooksRepository for MockWebhooksRepository {
             .cloned()
             .collect();
         Ok(webhooks)
+    }
+
+    async fn list_webhooks(
+        &self,
+        request: ListWebhooksRequest,
+    ) -> Result<WebhooksPage, GetWebhooksError> {
+        let all: Vec<Webhook> = self
+            .webhooks
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|w| w.secret_id == request.secret_id)
+            .cloned()
+            .collect();
+        let total = all.len() as i64;
+        let items = all
+            .into_iter()
+            .skip(request.offset as usize)
+            .take(request.limit as usize)
+            .collect();
+        Ok(WebhooksPage { items, total })
+    }
+
+    async fn delete_webhook(&self, webhook_id: Uuid) -> Result<bool, DeleteWebhookError> {
+        let mut webhooks = self.webhooks.lock().unwrap();
+        let len_before = webhooks.len();
+        webhooks.retain(|w| w.id != webhook_id);
+        Ok(webhooks.len() < len_before)
     }
 }
 

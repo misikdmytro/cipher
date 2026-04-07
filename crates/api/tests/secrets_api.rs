@@ -75,59 +75,36 @@ async fn create_secret_forwards_schedule_request_to_scheduler() {
     assert_eq!(calls[0].cron_expression, cron);
 }
 
-#[rstest]
-#[case::invalid_cron(
-    json!({
-        "cron_expression": "not-a-cron",
-        "strategy": { "single": { "path": "some/valid/path" } },
-        "provider": { "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" } }
-    }),
-    Some("cron"),
-)]
-#[case::missing_provider(
-    json!({
-        "cron_expression": "0 0 0 * * * *",
-        "strategy": { "single": { "path": "some/valid/path" } },
-        "provider": {}
-    }),
-    None,
-)]
-#[case::both_strategies(
-    json!({
-        "cron_expression": "0 0 0 * * * *",
-        "strategy": {
-            "single": { "path": "a/path" },
-            "blue_green": { "blue_path": "a/path", "green_path": "b/path" }
-        },
-        "provider": { "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" } }
-    }),
-    None,
-)]
 #[tokio::test]
-async fn create_secret_with_invalid_body_returns_400(
-    #[case] body: serde_json::Value,
-    #[case] expected_message_fragment: Option<&str>,
-) {
+async fn create_secret_with_invalid_cron_returns_400() {
     let app = TestApp::spawn().await;
 
-    let response = app.post_secret(body).await;
+    let response = app
+        .post_secret(json!({
+            "cron_expression": "not-a-cron",
+            "strategy": { "single": { "path": "some/valid/path" } },
+            "provider": { "aws": { "role_arn": "arn:aws:iam::123456789012:role/TestRotator" } }
+        }))
+        .await;
 
     assert_eq!(response.status(), 400);
-
-    if let Some(fragment) = expected_message_fragment {
-        let body: serde_json::Value = response.json().await.unwrap();
-        let message = body["message"].as_str().unwrap_or("");
-        assert!(
-            message.contains(fragment),
-            "error message should contain '{fragment}', got: {message}"
-        );
-    }
+    let body: serde_json::Value = response.json().await.unwrap();
+    let message = body["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("cron"),
+        "error message should contain 'cron', got: {message}"
+    );
 }
 
 #[rstest]
 #[case::missing_field(r#"{"cron_expression": "0 0 0 * * * *"}"#, 422)]
 #[case::wrong_field_type(r#"{"cron_expression": 123}"#, 422)]
 #[case::malformed_json(r#"{ bad json }"#, 400)]
+#[case::empty_provider(
+    r#"{"cron_expression":"0 0 0 * * * *","strategy":{"single":{"path":"a"}},"provider":{}}"#,
+    400
+)]
+#[case::both_strategies(r#"{"cron_expression":"0 0 0 * * * *","strategy":{"single":{"path":"a"},"blue_green":{"blue_path":"a","green_path":"b"}},"provider":{"aws":{"role_arn":"arn:aws:iam::123456789012:role/R"}}}"#, 400)]
 #[tokio::test]
 async fn create_secret_with_malformed_body(#[case] body: &str, #[case] expected_status: u16) {
     let app = TestApp::spawn().await;
@@ -170,8 +147,6 @@ async fn list_secrets_returns_200_with_correct_shape() {
     let body: serde_json::Value = response.json().await.unwrap();
     assert!(body["items"].is_array());
     assert!(body["total"].is_number());
-    assert!(body["limit"].is_number());
-    assert!(body["offset"].is_number());
 }
 
 #[tokio::test]
@@ -200,7 +175,6 @@ async fn list_secrets_respects_limit() {
 
     let body: serde_json::Value = response.json().await.unwrap();
     assert!(body["items"].as_array().unwrap().len() <= 1);
-    assert_eq!(body["limit"].as_i64().unwrap(), 1);
 }
 
 #[tokio::test]
@@ -211,7 +185,6 @@ async fn list_secrets_clamps_limit_to_100() {
     assert_eq!(response.status(), 200);
 
     let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(body["limit"].as_i64().unwrap(), 100);
     assert!(body["items"].as_array().unwrap().len() <= 100);
 }
 

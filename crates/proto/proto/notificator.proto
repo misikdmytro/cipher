@@ -17,8 +17,43 @@ message RegisterWebhookResponse {
   string webhook_id = 1;
 }
 
+// A single webhook entry returned by list operations
+message WebhookEntry {
+  string id = 1;
+  string secret_id = 2;
+  string url = 3;
+  string created_at = 4;
+}
+
+// Request message for listing webhooks for a secret
+message ListWebhooksRequest {
+  string secret_id = 1;
+  int64 limit = 2;
+  int64 offset = 3;
+}
+
+// Response message containing the list of webhooks
+message ListWebhooksResponse {
+  repeated WebhookEntry webhooks = 1;
+  int64 total = 2;
+}
+
+// Request message for deleting a webhook
+message DeleteWebhookRequest {
+  string webhook_id = 1;
+}
+
+// Response message for webhook deletion
+message DeleteWebhookResponse {}
+
 // Service for managing webhook notifications
 service NotificatorService {
   // RegisterWebhook registers a new webhook URL for a given secret
   rpc RegisterWebhook(RegisterWebhookRequest) returns (RegisterWebhookResponse);
+
+  // ListWebhooks returns all webhooks registered for a given secret
+  rpc ListWebhooks(ListWebhooksRequest) returns (ListWebhooksResponse);
+
+  // DeleteWebhook removes a webhook by its ID
+  rpc DeleteWebhook(DeleteWebhookRequest) returns (DeleteWebhookResponse);
 }

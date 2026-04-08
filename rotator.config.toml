@@ -1,0 +1,23 @@
+[log]
+min_level = "DEBUG"
+
+[rabbitmq]
+host = "localhost"
+port = 5672
+username = "cipher"
+password = "cipher"
+
+[api]
+scheme = "http"
+host = "[::1]"
+port = 50051
+
+[grpc]
+scheme = "http"
+host = "[::1]"
+port = 50054
+
+[health]
+scheme = "http"
+host = "0.0.0.0"
+port = 8083

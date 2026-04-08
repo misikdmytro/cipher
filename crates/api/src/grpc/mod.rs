@@ -1,27 +1,19 @@
+pub mod api_service;
+
 use anyhow::Result;
-use proto::ping::{
-    PingRequest, PongResponse,
-    ping_service_server::{PingService, PingServiceServer},
-};
-use tonic::{Request, Response, Status, transport::Server};
+use proto::api::api_service_server::{ApiService, ApiServiceServer};
+use tokio_util::sync::CancellationToken;
+use tonic::transport::Server;
 
-pub struct PingServiceImpl;
-
-#[tonic::async_trait]
-impl PingService for PingServiceImpl {
-    async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<PongResponse>, Status> {
-        Ok(Response::new(PongResponse {
-            message: "Pong".to_string(),
-        }))
-    }
-}
-
-pub async fn serve() -> Result<()> {
-    let addr = "0.0.0.0:50051".parse()?;
+pub async fn serve(
+    svc: impl ApiService + 'static,
+    address: &str,
+    shutdown: CancellationToken,
+) -> Result<()> {
+    let addr = address.parse()?;
     Server::builder()
-        .add_service(PingServiceServer::new(PingServiceImpl))
-        .serve(addr)
-        .await?;
-
-    Ok(())
+        .add_service(ApiServiceServer::new(svc))
+        .serve_with_shutdown(addr, shutdown.cancelled_owned())
+        .await
+        .map_err(|e| anyhow::anyhow!("gRPC server failed: {e}"))
 }

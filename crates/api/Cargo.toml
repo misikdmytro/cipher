@@ -4,10 +4,29 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-"anyhow" = { workspace = true }
-"axum" = { workspace = true }
-"proto" = { path = "../proto" }
-"thiserror" = { workspace = true }
-"tonic" = { workspace = true }
-"tokio" = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+common = { path = "../common" }
+cron = { workspace = true }
+interfaces = { path = "../interfaces" }
+proto = { path = "../proto" }
+serde = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true }
+utoipa-axum = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
+uuid = { workspace = true }
+validator = { workspace = true }
 
+[dev-dependencies]
+reqwest = { workspace = true }
+rstest = { workspace = true }
+serde_json = { workspace = true }

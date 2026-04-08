@@ -1,0 +1,26 @@
+[log]
+min_level = "DEBUG"
+
+[database]
+username = "cipher"
+password = "cipher"
+host = "localhost"
+port = 5432
+database = "notificator"
+use_ssl = false
+
+[grpc]
+scheme = "http"
+host = "[::1]"
+port = 50053
+
+[health]
+scheme = "http"
+host = "0.0.0.0"
+port = 8084
+
+[rabbitmq]
+host = "localhost"
+port = 5672
+username = "cipher"
+password = "cipher"

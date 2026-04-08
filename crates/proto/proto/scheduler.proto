@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package scheduler;
+
+import "google/protobuf/empty.proto";
+
+// Request message for scheduling a secret rotation
+message ScheduleSecretRotationRequest {
+  // The ID of the secret to rotate
+  string secret_id = 1;
+
+  // The cron expression defining the rotation schedule (e.g., "0 0 * * *" for daily at midnight)
+  string cron_expression = 2;
+}
+
+// Service for scheduling secret rotations
+service SchedulerService {
+  // Schedule a secret rotation based on the provided request
+  rpc ScheduleSecretRotation(ScheduleSecretRotationRequest) returns (google.protobuf.Empty);
+}
